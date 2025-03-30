@@ -46,7 +46,7 @@ require (
 	gorm.io/gorm v1.25.10 // indirect
 	k8s.io/apimachinery v0.29.0 // indirect
 	k8s.io/apiserver v0.28.2 // indirect
-	k8s.io/client-go v1.5.2 // indirect
+	k8s.io/client-go v11.0.0+incompatible // indirect
 	k8s.io/klog/v2 v2.120.1 // indirect
 	k8s.io/utils v0.0.0-20230726121419-3b25d923346b // indirect
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
