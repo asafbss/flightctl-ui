@@ -43,7 +43,7 @@ require (
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	gorm.io/gorm v1.25.10 // indirect
+	gorm.io/gorm v1.25.12 // indirect
 	k8s.io/apimachinery v0.29.0 // indirect
 	k8s.io/apiserver v0.28.2 // indirect
 	k8s.io/client-go v1.5.2 // indirect
