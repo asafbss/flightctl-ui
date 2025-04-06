@@ -1,6 +1,8 @@
 module github.com/flightctl/flightctl-ui
 
-go 1.21
+go 1.22
+
+toolchain go1.22.9
 
 require (
 	github.com/flightctl/flightctl v0.2.0
@@ -39,7 +41,7 @@ require (
 	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240528184218-531527333157 // indirect
-	google.golang.org/protobuf v1.34.2 // indirect
+	google.golang.org/protobuf v1.36.6 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
