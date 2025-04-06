@@ -1,6 +1,8 @@
 module github.com/flightctl/flightctl-ui
 
-go 1.21
+go 1.23.0
+
+toolchain go1.23.8
 
 require (
 	github.com/flightctl/flightctl v0.2.0
@@ -9,7 +11,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/openshift/osincli v0.0.0-20160924135400-fababb0555f2
 	github.com/sirupsen/logrus v1.9.3
-	golang.org/x/sync v0.7.0
+	golang.org/x/sync v0.13.0
 	google.golang.org/grpc v1.65.0
 )
 
@@ -37,7 +39,7 @@ require (
 	github.com/perimeterx/marshmallow v1.1.5 // indirect
 	golang.org/x/net v0.27.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
-	golang.org/x/text v0.16.0 // indirect
+	golang.org/x/text v0.24.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240528184218-531527333157 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
