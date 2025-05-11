@@ -9,7 +9,7 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/openshift/osincli v0.0.0-20160924135400-fababb0555f2
 	github.com/sirupsen/logrus v1.9.3
-	golang.org/x/sync v0.7.0
+	golang.org/x/sync v0.14.0
 	google.golang.org/grpc v1.65.0
 )
 
