@@ -22,9 +22,6 @@
     "build": "tsc --build && npm run copy:css",
     "copy:css": "rsync -Rurv --include '*/' --include '*.css' --exclude '*' src  dist",
     "dev": "tsc -w",
-    "test": "jest",
-    "test:watch": "jest --watch",
-    "test:coverage": "jest --coverage",
     "ts-node": "ts-node -O '{\"module\":\"commonjs\"}'"
   },
   "devDependencies": {
@@ -43,10 +40,10 @@
   },
   "peerDependencies": {
     "@patternfly/react-charts": "^7.2.2",
-    "@patternfly/react-core": "^5.0.0",
-    "@patternfly/react-icons": "^5.0.0",
-    "@patternfly/react-styles": "^5.1.2",
-    "@patternfly/react-table": "^5.0.0",
+    "@patternfly/react-core": "^5.0.0 <= 5.4.8",
+    "@patternfly/react-icons": "^5.0.0 <= 5.4.2",
+    "@patternfly/react-styles": "^5.1.2 <= 5.4.1",
+    "@patternfly/react-table": "^5.0.0 <= 5.4.9",
     "i18next": "21.8.14 - 23.x",
     "react": "17.0.1 - 18.x",
     "react-dom": "17.0.1 - 18.x",

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { deleteData, fetchData, patchData, postData } from '../utils/apiCalls';
+import { deleteData, fetchData, patchData, postData, putData } from '../utils/apiCalls';
 import { PatchRequest } from '@flightctl/types';
 
 export const useFetch = (getCookie: (name: string) => string | undefined, serviceUrl = '') => {
@@ -28,6 +28,11 @@ export const useFetch = (getCookie: (name: string) => string | undefined, servic
     [serviceUrl, applyHeaders],
   );
 
+  const put = React.useCallback(
+    async <R>(kind: string, obj: R): Promise<R> => putData(kind, obj, serviceUrl, applyHeaders),
+    [serviceUrl, applyHeaders],
+  );
+
   const remove = React.useCallback(
     async <R>(kind: string, abortSignal?: AbortSignal): Promise<R> =>
       deleteData(kind, serviceUrl, applyHeaders, abortSignal),
@@ -41,18 +46,19 @@ export const useFetch = (getCookie: (name: string) => string | undefined, servic
   );
 
   const getWsEndpoint = React.useCallback(
-    () => ({
-      wsEndpoint: '',
-      protocols: [],
-    }),
-    [],
+    (deviceId: string) => `${serviceUrl}/ws/v1/devices/${deviceId}/console`,
+    [serviceUrl],
   );
+
+  const checkPermissions = React.useCallback(() => Promise.resolve(true), []);
 
   return {
     getWsEndpoint,
     get,
     post,
+    put,
     remove,
     patch,
+    checkPermissions,
   };
 };

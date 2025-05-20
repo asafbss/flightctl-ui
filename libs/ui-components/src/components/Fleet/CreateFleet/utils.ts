@@ -1,40 +1,55 @@
 import { Fleet, PatchRequest } from '@flightctl/types';
 import { TFunction } from 'i18next';
 import * as Yup from 'yup';
-import { FleetFormValues } from './types';
 import { API_VERSION } from '../../../constants';
 import { toAPILabel } from '../../../utils/labels';
 import {
-  maxLengthString,
   systemdUnitListValidationSchema,
   validApplicationsSchema,
   validConfigTemplatesSchema,
+  validFleetDisruptionBudgetSchema,
+  validFleetRolloutPolicySchema,
   validKubernetesDnsSubdomain,
   validLabelsSchema,
+  validOsImage,
+  validUpdatePolicySchema,
 } from '../../form/validations';
 import {
   appendJSONPatch,
-  getApplicationPatches,
   getLabelPatches,
+  getRolloutPolicyData,
+  getRolloutPolicyPatches,
   getStringListPatches,
-  toAPIApplication,
+  getUpdatePolicyPatches,
+  updatePolicyFormToApi,
 } from '../../../utils/patch';
 import {
-  getAPIConfig,
+  ACMCrdConfig,
+  ACMImportConfig,
+  MicroshiftRegistrationHook,
+  getApiConfig,
+  getApplicationPatches,
   getApplicationValues,
   getConfigTemplatesValues,
   getDeviceSpecConfigPatches,
+  hasMicroshiftRegistrationConfig,
+  toAPIApplication,
 } from '../../Device/EditDeviceWizard/deviceSpecUtils';
+import { getDisruptionBudgetValues, getRolloutPolicyValues, getUpdatePolicyValues } from './fleetSpecUtils';
+import { FleetFormValues, UpdatePolicyForm } from '../../../types/deviceSpec';
 
 export const getValidationSchema = (t: TFunction) => {
   return Yup.object<FleetFormValues>({
     name: validKubernetesDnsSubdomain(t, { isRequired: true }),
-    osImage: maxLengthString(t, { fieldName: t('System image'), maxLength: 2048 }),
+    osImage: validOsImage(t, { isFleet: true }),
     fleetLabels: validLabelsSchema(t),
     labels: validLabelsSchema(t),
     configTemplates: validConfigTemplatesSchema(t),
     applications: validApplicationsSchema(t),
     systemdUnits: systemdUnitListValidationSchema(t),
+    rolloutPolicy: validFleetRolloutPolicySchema(t),
+    disruptionBudget: validFleetDisruptionBudgetSchema(t),
+    updatePolicy: validUpdatePolicySchema(t),
   });
 };
 
@@ -52,6 +67,7 @@ export const getFleetPatches = (currentFleet: Fleet, updatedFleet: FleetFormValu
   const currentDeviceSelectLabels = currentFleet.spec.selector?.matchLabels || {};
   const updatedDeviceSelectLabels = updatedFleet.labels || {};
   const updatedDeviceSelectLabelCount = Object.keys(updatedDeviceSelectLabels).length;
+  const currentDeviceSelectLabelCount = Object.keys(currentDeviceSelectLabels).length;
 
   if (updatedDeviceSelectLabelCount > 0) {
     if (currentFleet.spec.selector) {
@@ -69,7 +85,7 @@ export const getFleetPatches = (currentFleet: Fleet, updatedFleet: FleetFormValu
         value: { matchLabels: newLabelMap },
       });
     }
-  } else if (currentFleet.spec.selector) {
+  } else if (currentDeviceSelectLabelCount > 0) {
     allPatches.push({
       path: '/spec/selector',
       op: 'remove',
@@ -101,7 +117,10 @@ export const getFleetPatches = (currentFleet: Fleet, updatedFleet: FleetFormValu
 
   // Configurations
   const currentConfigs = currentFleet.spec.template.spec.config || [];
-  const newConfigs = updatedFleet.configTemplates.map(getAPIConfig);
+  const newConfigs = updatedFleet.configTemplates.map(getApiConfig);
+  if (updatedFleet.registerMicroShift) {
+    newConfigs.push(ACMCrdConfig, ACMImportConfig, MicroshiftRegistrationHook);
+  }
   const configPatches = getDeviceSpecConfigPatches(currentConfigs, newConfigs, '/spec/template/spec/config');
   allPatches = allPatches.concat(configPatches);
 
@@ -122,6 +141,17 @@ export const getFleetPatches = (currentFleet: Fleet, updatedFleet: FleetFormValu
   );
   allPatches = allPatches.concat(unitPatches);
 
+  // Rollout policies (includes disruption budget)
+  const rolloutPolicyPatches = getRolloutPolicyPatches(currentFleet.spec.rolloutPolicy, updatedFleet);
+  allPatches = allPatches.concat(rolloutPolicyPatches);
+
+  // Update policies
+  const updatePolicyPatches = getUpdatePolicyPatches(
+    '/spec/template/spec/updatePolicy',
+    currentFleet.spec.template.spec.updatePolicy,
+    updatedFleet.updatePolicy as Required<UpdatePolicyForm>,
+  );
+  allPatches = allPatches.concat(updatePolicyPatches);
   return allPatches;
 };
 
@@ -134,7 +164,7 @@ export const getFleetResource = (values: FleetFormValues): Fleet => {
             matchPatterns: values.systemdUnits.map((unit) => unit.pattern),
           },
         };
-  return {
+  const fleet: Fleet = {
     apiVersion: API_VERSION,
     kind: 'Fleet',
     metadata: {
@@ -153,41 +183,65 @@ export const getFleetResource = (values: FleetFormValues): Fleet => {
         },
         spec: {
           os: values.osImage ? { image: values.osImage || '' } : undefined,
-          config: values.configTemplates.map(getAPIConfig),
+          config: values.configTemplates.map(getApiConfig),
           applications: values.applications.map(toAPIApplication),
           ...systemdPatterns,
         },
       },
     },
   };
+
+  if (values.registerMicroShift) {
+    fleet.spec.template.spec.config?.push(ACMCrdConfig, ACMImportConfig, MicroshiftRegistrationHook);
+  }
+  if (values.rolloutPolicy.isAdvanced || values.disruptionBudget.isAdvanced) {
+    fleet.spec.rolloutPolicy = getRolloutPolicyData(values);
+  }
+  if (values.updatePolicy.isAdvanced) {
+    fleet.spec.template.spec.updatePolicy = updatePolicyFormToApi(values.updatePolicy as Required<UpdatePolicyForm>);
+  }
+
+  return fleet;
 };
 
-export const getInitialValues = (fleet?: Fleet): FleetFormValues =>
-  fleet
-    ? {
-        name: fleet.metadata.name || '',
-        labels: Object.keys(fleet.spec.selector?.matchLabels || {}).map((key) => ({
-          key,
-          value: fleet.spec.selector?.matchLabels?.[key],
-        })),
-        fleetLabels: Object.keys(fleet.metadata.labels || {}).map((key) => ({
-          key,
-          value: fleet.metadata.labels?.[key],
-        })),
-        osImage: fleet.spec.template.spec.os?.image || '',
-        configTemplates: getConfigTemplatesValues(fleet.spec.template.spec),
-        applications: getApplicationValues(fleet.spec.template.spec),
-        systemdUnits: (fleet.spec.template.spec.systemd?.matchPatterns || []).map((p) => ({
-          pattern: p,
-          exists: true,
-        })),
-      }
-    : {
-        name: '',
-        labels: [],
-        fleetLabels: [],
-        osImage: '',
-        configTemplates: [],
-        applications: [],
-        systemdUnits: [],
-      };
+export const getInitialValues = (fleet?: Fleet): FleetFormValues => {
+  if (fleet) {
+    const registerMicroShift = hasMicroshiftRegistrationConfig(fleet.spec.template.spec);
+    return {
+      name: fleet.metadata.name || '',
+      labels: Object.keys(fleet.spec.selector?.matchLabels || {}).map((key) => ({
+        key,
+        value: fleet.spec.selector?.matchLabels?.[key],
+      })),
+      fleetLabels: Object.keys(fleet.metadata.labels || {}).map((key) => ({
+        key,
+        value: fleet.metadata.labels?.[key],
+      })),
+      osImage: fleet.spec.template.spec.os?.image || '',
+      configTemplates: getConfigTemplatesValues(fleet.spec.template.spec, registerMicroShift),
+      applications: getApplicationValues(fleet.spec.template.spec),
+      systemdUnits: (fleet.spec.template.spec.systemd?.matchPatterns || []).map((p) => ({
+        pattern: p,
+        exists: true,
+      })),
+      registerMicroShift,
+      rolloutPolicy: getRolloutPolicyValues(fleet.spec),
+      disruptionBudget: getDisruptionBudgetValues(fleet.spec),
+      updatePolicy: getUpdatePolicyValues(fleet.spec.template?.spec?.updatePolicy),
+    };
+  }
+
+  return {
+    name: '',
+    labels: [],
+    fleetLabels: [],
+    osImage: '',
+    configTemplates: [],
+    applications: [],
+    systemdUnits: [],
+    registerMicroShift: false,
+    rolloutPolicy: getRolloutPolicyValues(undefined),
+    disruptionBudget: getDisruptionBudgetValues(undefined),
+    updatePolicy: getUpdatePolicyValues(undefined),
+  };
+};

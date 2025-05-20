@@ -3,19 +3,19 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { Condition } from './Condition';
-import type { EnrollmentRequestApproval } from './EnrollmentRequestApproval';
+import type { EnrollmentRequestApprovalStatus } from './EnrollmentRequestApprovalStatus';
 /**
  * EnrollmentRequestStatus represents information about the status of a EnrollmentRequest.
  */
 export type EnrollmentRequestStatus = {
   /**
-   * certificate is a PEM-encoded signed certificate.
+   * The PEM-encoded signed certificate.
    */
   certificate?: string;
   /**
    * Current state of the EnrollmentRequest.
    */
   conditions: Array<Condition>;
-  approval?: EnrollmentRequestApproval;
+  approval?: EnrollmentRequestApprovalStatus;
 };
 

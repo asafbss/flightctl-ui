@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { AppContext, AppContextProps, NavLinkFC } from '@flightctl/ui-components/src/hooks/useAppContext';
+import { AppContext, AppContextProps, FlightCtlApp, NavLinkFC } from '@flightctl/ui-components/src/hooks/useAppContext';
 import {
   Link,
   NavLink,
@@ -13,7 +13,6 @@ import {
   useSearchParams,
 } from 'react-router-dom';
 import { useFetch } from '../../hooks/useFetch';
-import { useMetrics } from '../../hooks/useMetrics';
 
 import { appRoutes } from '../../const';
 
@@ -23,13 +22,11 @@ type GetCookie = (cookieName: string) => string | undefined;
 
 export const useValuesAppContext = (getCookie: GetCookie, serviceUrl: string | undefined): AppContextProps => {
   const fetch = useFetch(getCookie, serviceUrl);
-  const metrics = useMetrics();
 
   return {
-    appType: 'aap',
+    appType: FlightCtlApp.AAP,
+    settings: {},
     user: '',
-    bootcImgUrl: undefined,
-    qcow2ImgUrl: undefined,
     router: {
       useNavigate,
       Link,
@@ -47,7 +44,6 @@ export const useValuesAppContext = (getCookie: GetCookie, serviceUrl: string | u
       transNamespace: 'plugin__flightctl-plugin',
     },
     fetch,
-    metrics,
   };
 };
 

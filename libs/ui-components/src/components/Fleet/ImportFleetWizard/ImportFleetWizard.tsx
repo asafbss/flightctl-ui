@@ -40,6 +40,8 @@ import { useTranslation } from '../../../hooks/useTranslation';
 import { Link, ROUTE, useNavigate } from '../../../hooks/useNavigate';
 import LeaveFormConfirmation from '../../common/LeaveFormConfirmation';
 import ErrorBoundary from '../../common/ErrorBoundary';
+import PageWithPermissions from '../../common/PageWithPermissions';
+import { useFleetImportAccessReview } from '../../../hooks/useFleetImportAccessReview';
 
 import './ImportFleetWizard.css';
 
@@ -98,12 +100,12 @@ const ImportFleetWizard = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = React.useState<WizardStepType>();
   const [repoList, isLoading, error] = useFetchPeriodically<RepositoryList>({
-    endpoint: 'repositories?sortBy=metadata.name&sortOrder=Asc',
+    endpoint: 'repositories',
   });
 
   const gitRepositories = (repoList?.items || []).filter((repo) => repo.spec.type === RepoSpecType.GIT);
 
-  let body;
+  let body: React.ReactNode;
 
   if (isLoading) {
     body = (
@@ -215,4 +217,13 @@ const ImportFleetWizard = () => {
   );
 };
 
-export default ImportFleetWizard;
+const ImportFleetWizardWithPermissions = () => {
+  const [allowed, isLoading] = useFleetImportAccessReview();
+  return (
+    <PageWithPermissions allowed={allowed} loading={isLoading}>
+      <ImportFleetWizard />
+    </PageWithPermissions>
+  );
+};
+
+export default ImportFleetWizardWithPermissions;

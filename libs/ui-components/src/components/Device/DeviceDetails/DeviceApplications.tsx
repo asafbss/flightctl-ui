@@ -9,13 +9,15 @@ import { getDeviceFleet } from '../../../utils/devices';
 import SystemdUnitsModal from '../SystemdUnitsModal/SystemdUnitsModal';
 import ApplicationsTable from '../../DetailsPage/Tables/ApplicationsTable';
 import DetailsPageCard, { DetailsPageCardBody } from '../../DetailsPage/DetailsPageCard';
+import { isImageAppProvider } from '../../../types/deviceSpec';
 
 type DeviceDetailsTabProps = {
   device: Required<Device>;
-  refetch: VoidFunction;
+  canEdit: boolean;
+  refetch?: VoidFunction;
 };
 
-const DeviceApplications = ({ device, refetch }: React.PropsWithChildren<DeviceDetailsTabProps>) => {
+const DeviceApplications = ({ device, refetch, canEdit }: React.PropsWithChildren<DeviceDetailsTabProps>) => {
   const { t } = useTranslation();
   const { patch } = useFetch();
   const [showSystemdModal, setShowSystemdModal] = React.useState<boolean>(false);
@@ -24,7 +26,7 @@ const DeviceApplications = ({ device, refetch }: React.PropsWithChildren<DeviceD
 
   const onClose = (hasChanges?: boolean, addedUnits?: string[]) => {
     if (hasChanges) {
-      refetch();
+      refetch?.();
     }
     if (addedUnits?.length) {
       const allAddedUnitDates = { ...addedSystemdDates };
@@ -39,6 +41,13 @@ const DeviceApplications = ({ device, refetch }: React.PropsWithChildren<DeviceD
 
   const isManagedDevice = !!getDeviceFleet(device.metadata);
   const trackedSystemdUnits = device.spec?.systemd?.matchPatterns || [];
+  const specApps =
+    device.spec?.applications?.map((app) => {
+      if (isImageAppProvider(app)) {
+        return app.name || app.image;
+      }
+      return app.name as string;
+    }) || [];
   const apps = device.status.applications; // includes available systemdUnits
 
   const deleteSystemdUnit = isManagedDevice
@@ -54,7 +63,7 @@ const DeviceApplications = ({ device, refetch }: React.PropsWithChildren<DeviceD
           if (patches.length > 0) {
             setIsUpdating(true);
             await patch(`devices/${device.metadata.name}`, patches);
-            refetch();
+            refetch?.();
             setIsUpdating(false);
           }
         };
@@ -66,7 +75,7 @@ const DeviceApplications = ({ device, refetch }: React.PropsWithChildren<DeviceD
       <CardTitle>
         <Flex justifyContent={{ default: 'justifyContentSpaceBetween' }}>
           <FlexItem>{t('Applications')}</FlexItem>
-          {!isManagedDevice && (
+          {!isManagedDevice && canEdit && (
             <FlexItem>
               <Button
                 variant="link"
@@ -84,10 +93,12 @@ const DeviceApplications = ({ device, refetch }: React.PropsWithChildren<DeviceD
       <DetailsPageCardBody>
         <ApplicationsTable
           appsStatus={apps}
-          systemdUnits={trackedSystemdUnits}
+          specApps={specApps}
+          specSystemdUnits={trackedSystemdUnits}
           onSystemdDelete={deleteSystemdUnit}
           isUpdating={isUpdating}
           addedSystemdUnitDates={addedSystemdDates}
+          canEdit={canEdit}
         />
         {showSystemdModal && <SystemdUnitsModal device={device} onClose={onClose} />}
       </DetailsPageCardBody>

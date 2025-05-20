@@ -1,4 +1,5 @@
 import { FlightCtlLabel } from '../types/extraTypes';
+import { labelToExactApiMatchString, textToPartialApiMatchString } from './labels';
 
 const addQueryConditions = (fieldSelectors: string[], fieldSelector: string, values?: string[]) => {
   if (values?.length === 1) {
@@ -24,6 +25,55 @@ const setLabelParams = (params: URLSearchParams, labels?: FlightCtlLabel[]) => {
     }, '');
     params.append('labelSelector', labelSelector);
   }
+};
+
+type CommonQueryOptions = {
+  limit: number | undefined;
+};
+
+export const commonQueries = {
+  getDevicesWithExactLabelMatching: (labels: FlightCtlLabel[], options?: CommonQueryOptions) => {
+    const searchParams = new URLSearchParams();
+
+    const exactLabelsMatch = labels.map(labelToExactApiMatchString).join(',');
+    searchParams.set('labelSelector', exactLabelsMatch);
+
+    if (options?.limit) {
+      searchParams.set('limit', `${options.limit}`);
+    }
+    return `devices?${searchParams.toString()}`;
+  },
+  getDevicesWithPartialLabelMatching: (text: string, options?: CommonQueryOptions) => {
+    const searchParams = new URLSearchParams({
+      kind: 'Device',
+    });
+
+    searchParams.set('fieldSelector', textToPartialApiMatchString(text));
+
+    if (options?.limit) {
+      searchParams.set('limit', `${options.limit}`);
+    }
+    return `labels?${searchParams.toString()}`;
+  },
+  getFleetsWithNameMatching: (matchName: string, options?: CommonQueryOptions) => {
+    const searchParams = new URLSearchParams();
+    searchParams.set('fieldSelector', `metadata.name contains ${matchName}`);
+
+    if (options?.limit) {
+      searchParams.set('limit', `${options.limit}`);
+    }
+    return `fleets?${searchParams.toString()}`;
+  },
+  getResourceSyncsByRepo: (repositoryId: string, options?: CommonQueryOptions) => {
+    const searchParams = new URLSearchParams();
+    searchParams.set('fieldSelector', `spec.repository=${repositoryId}`);
+
+    if (options?.limit) {
+      searchParams.set('limit', `${options.limit}`);
+    }
+    return `resourcesyncs?${searchParams.toString()}`;
+  },
+  getRepositoryById: (repositoryId: string) => `repositories/${repositoryId}`,
 };
 
 export { addQueryConditions, addTextContainsCondition, setLabelParams };

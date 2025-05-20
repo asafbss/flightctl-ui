@@ -3,7 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { BatchSequence } from './BatchSequence';
-export type RolloutDeviceSelection = (BatchSequence | {
-  strategy: string;
-});
+/**
+ * Describes how to select devices for rollout.
+ */
+export type RolloutDeviceSelection = BatchSequence;
 

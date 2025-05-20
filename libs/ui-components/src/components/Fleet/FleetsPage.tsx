@@ -4,10 +4,10 @@ import {
   EmptyStateActions,
   EmptyStateBody,
   EmptyStateFooter,
-  SelectList,
-  SelectOption,
   Split,
   SplitItem,
+  Stack,
+  StackItem,
   Toolbar,
   ToolbarContent,
   ToolbarGroup,
@@ -15,16 +15,14 @@ import {
 } from '@patternfly/react-core';
 import { Tbody } from '@patternfly/react-table';
 import { TopologyIcon } from '@patternfly/react-icons/dist/js/icons/topology-icon';
-import { Trans } from 'react-i18next';
 import { TFunction } from 'i18next';
 
-import { Fleet } from '@flightctl/types';
 import ListPage from '../ListPage/ListPage';
 import ListPageBody from '../ListPage/ListPageBody';
+import TablePagination from '../Table/TablePagination';
 import TableTextSearch from '../Table/TableTextSearch';
 import Table, { ApiSortTableColumn } from '../Table/Table';
 import { useTableSelect } from '../../hooks/useTableSelect';
-import TableActions from '../Table/TableActions';
 import { getResourceId } from '../../utils/resource';
 import MassDeleteFleetModal from '../modals/massModals/MassDeleteFleetModal/MassDeleteFleetModal';
 import FleetRow from './FleetRow';
@@ -34,21 +32,37 @@ import { ROUTE, useNavigate } from '../../hooks/useNavigate';
 import DeleteFleetModal from './DeleteFleetModal/DeleteFleetModal';
 import FleetResourceSyncs from './FleetResourceSyncs';
 import { useFleetBackendFilters, useFleets } from './useFleets';
+import { useAccessReview } from '../../hooks/useAccessReview';
+import ButtonWithPermissions from '../common/ButtonWithPermissions';
+import { RESOURCE, VERB } from '../../types/rbac';
+import PageWithPermissions from '../common/PageWithPermissions';
+import { useFleetImportAccessReview } from '../../hooks/useFleetImportAccessReview';
 
 const FleetPageActions = ({ createText }: { createText?: string }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const canCreateFleet = useAccessReview(RESOURCE.FLEET, VERB.CREATE);
+  const canImportFleet = useFleetImportAccessReview();
+
   return (
     <Split hasGutter>
       <SplitItem>
-        <Button variant="primary" onClick={() => navigate(ROUTE.FLEET_CREATE)}>
+        <ButtonWithPermissions
+          permissions={canCreateFleet}
+          variant="primary"
+          onClick={() => navigate(ROUTE.FLEET_CREATE)}
+        >
           {createText || t('Create a fleet')}
-        </Button>
+        </ButtonWithPermissions>
       </SplitItem>
       <SplitItem>
-        <Button variant="secondary" onClick={() => navigate(ROUTE.FLEET_IMPORT)}>
+        <ButtonWithPermissions
+          permissions={canImportFleet}
+          variant="secondary"
+          onClick={() => navigate(ROUTE.FLEET_IMPORT)}
+        >
           {t('Import fleets')}
-        </Button>
+        </ButtonWithPermissions>
       </SplitItem>
     </Split>
   );
@@ -57,13 +71,13 @@ const FleetPageActions = ({ createText }: { createText?: string }) => {
 const FleetEmptyState = () => {
   const { t } = useTranslation();
   return (
-    <ResourceListEmptyState icon={TopologyIcon} titleText={t('No fleets here!')}>
+    <ResourceListEmptyState icon={TopologyIcon} titleText={t('No fleets yet')}>
       <EmptyStateBody>
-        <Trans t={t}>
-          Fleets are an easy way to manage multiple devices that share the same configurations.
-          <br />
-          With fleets you will be able to edit and update devices in mass.
-        </Trans>
+        <Stack>
+          <StackItem>{t('Fleets make it easier to manage multiple devices with shared configurations.')}</StackItem>
+          <StackItem>{t('Fleets allow you to edit and update your devices at once.')}</StackItem>
+          <StackItem>{t('To get started, create a new fleet or import an existing configuration.')}</StackItem>
+        </Stack>
       </EmptyStateBody>
       <EmptyStateFooter>
         <EmptyStateActions>
@@ -82,33 +96,32 @@ const getColumns = (t: TFunction): ApiSortTableColumn[] => [
     name: t('System image'),
   },
   {
-    name: t('Devices'),
+    name: t('Up-to-date/devices'),
   },
   {
     name: t('Status'),
   },
 ];
 
-type FleetTableProps = {
-  fleetColumns: ApiSortTableColumn[];
-  fleetLoad: FleetLoad;
-  // getSortParams: (columnIndex: number) => ThProps['sort'];
-  hasFiltersEnabled: boolean;
-  name: string | undefined;
-  setName: (name: string) => void;
-};
-
-const FleetTable = ({ name, setName, hasFiltersEnabled, fleetColumns, fleetLoad }: FleetTableProps) => {
+const FleetTable = () => {
   const { t } = useTranslation();
+
+  const fleetColumns = React.useMemo(() => getColumns(t), [t]);
+  const { name, setName, hasFiltersEnabled } = useFleetBackendFilters();
+
+  const { fleets, isLoading, error, isUpdating, refetch, pagination } = useFleets({ name, addDevicesSummary: true });
 
   const [isMassDeleteModalOpen, setIsMassDeleteModalOpen] = React.useState(false);
   const [fleetToDeleteId, setFleetToDeleteId] = React.useState<string>();
-  const [fleets, loading, error, isFilterUpdating, refetch] = fleetLoad;
 
   const { onRowSelect, isAllSelected, hasSelectedRows, isRowSelected, setAllSelected } = useTableSelect();
 
+  const [canDelete] = useAccessReview(RESOURCE.FLEET, VERB.DELETE);
+  const [canCreate] = useAccessReview(RESOURCE.FLEET, VERB.CREATE);
+  const [canEdit] = useAccessReview(RESOURCE.FLEET, VERB.PATCH);
+
   return (
-    <ListPageBody error={error} loading={loading}>
+    <ListPageBody error={error} loading={isLoading}>
       <Toolbar inset={{ default: 'insetNone' }}>
         <ToolbarContent>
           <ToolbarGroup>
@@ -116,24 +129,27 @@ const FleetTable = ({ name, setName, hasFiltersEnabled, fleetColumns, fleetLoad 
               <TableTextSearch value={name} setValue={setName} placeholder={t('Search by name')} />
             </ToolbarItem>
           </ToolbarGroup>
-          <ToolbarItem>
-            <FleetPageActions createText={t('Create fleet')} />
-          </ToolbarItem>
-          <ToolbarItem>
-            <TableActions isDisabled={!hasSelectedRows}>
-              <SelectList>
-                <SelectOption onClick={() => setIsMassDeleteModalOpen(true)}>{t('Delete')}</SelectOption>
-              </SelectList>
-            </TableActions>
-          </ToolbarItem>
+          {canCreate && (
+            <ToolbarItem>
+              <FleetPageActions createText={t('Create fleet')} />
+            </ToolbarItem>
+          )}
+          {canDelete && (
+            <ToolbarItem>
+              <Button isDisabled={!hasSelectedRows} onClick={() => setIsMassDeleteModalOpen(true)} variant="secondary">
+                {t('Delete fleets')}
+              </Button>
+            </ToolbarItem>
+          )}
         </ToolbarContent>
       </Toolbar>
       <Table
         aria-label={t('Fleets table')}
-        loading={isFilterUpdating}
+        loading={isUpdating}
         columns={fleetColumns}
-        emptyFilters={!hasFiltersEnabled}
+        hasFilters={hasFiltersEnabled}
         emptyData={fleets.length === 0}
+        clearFilters={() => setName('')}
         isAllSelected={isAllSelected}
         onSelectAll={setAllSelected}
       >
@@ -143,16 +159,19 @@ const FleetTable = ({ name, setName, hasFiltersEnabled, fleetColumns, fleetLoad 
               key={getResourceId(fleet)}
               fleet={fleet}
               rowIndex={rowIndex}
+              canDelete={canDelete}
               onDeleteClick={() => {
                 setFleetToDeleteId(fleet.metadata.name || '');
               }}
               isRowSelected={isRowSelected}
               onRowSelect={onRowSelect}
+              canEdit={canEdit}
             />
           ))}
         </Tbody>
       </Table>
-      {fleets.length === 0 && <FleetEmptyState />}
+      <TablePagination pagination={pagination} isUpdating={isUpdating} />
+      {!isUpdating && fleets.length === 0 && !name && <FleetEmptyState />}
       {fleetToDeleteId && (
         <DeleteFleetModal
           fleetId={fleetToDeleteId}
@@ -178,31 +197,27 @@ const FleetTable = ({ name, setName, hasFiltersEnabled, fleetColumns, fleetLoad 
   );
 };
 
-type FleetLoad = [Fleet[], boolean, unknown, boolean, VoidFunction];
-
 const FleetsPage = () => {
   const { t } = useTranslation();
 
-  // TODO move the fetch down to FleetTable when the API includes the filter for pending / errored resource syncs
-  const columns = React.useMemo(() => getColumns(t), [t]);
-  const { name, setName, hasFiltersEnabled } = useFleetBackendFilters();
-  const fleetLoad = useFleets({ name, addDevicesCount: true });
-
   return (
     <>
-      <FleetResourceSyncs fleets={fleetLoad[0] || []} />
+      <FleetResourceSyncs />
 
       <ListPage title={t('Fleets')}>
-        <FleetTable
-          name={name}
-          setName={setName}
-          hasFiltersEnabled={hasFiltersEnabled}
-          fleetLoad={fleetLoad}
-          fleetColumns={columns}
-        />
+        <FleetTable />
       </ListPage>
     </>
   );
 };
 
-export default FleetsPage;
+const FleetsPageWithPermissions = () => {
+  const [allowed, loading] = useAccessReview(RESOURCE.FLEET, VERB.LIST);
+  return (
+    <PageWithPermissions allowed={allowed} loading={loading}>
+      <FleetsPage />
+    </PageWithPermissions>
+  );
+};
+
+export default FleetsPageWithPermissions;

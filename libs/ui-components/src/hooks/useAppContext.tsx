@@ -12,8 +12,10 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom';
-import { ROUTE } from './useNavigate';
 import { PatchRequest } from '@flightctl/types';
+import { CliArtifactsResponse } from '@flightctl/ui-components/src/types/extraTypes';
+import { ROUTE } from './useNavigate';
+import { RESOURCE, VERB } from '../types/rbac';
 
 export const appRoutes = {
   [ROUTE.ROOT]: '/',
@@ -32,18 +34,25 @@ export const appRoutes = {
   [ROUTE.RESOURCE_SYNC_DETAILS]: '/devicemanagement/resourcesyncs',
   [ROUTE.ENROLLMENT_REQUESTS]: '/devicemanagement/enrollmentrequests',
   [ROUTE.ENROLLMENT_REQUEST_DETAILS]: '/devicemanagement/enrollmentrequests',
+  [ROUTE.COMMAND_LINE_TOOLS]: '/command-line-tools',
 };
 
 export type NavLinkFC = React.FC<{ to: string; children: (props: { isActive: boolean }) => React.ReactNode }>;
 export type PromptFC = React.FC<{ message: string }>;
+export enum FlightCtlApp {
+  STANDALONE = 'standalone',
+  OCP = 'ocp',
+  AAP = 'aap',
+}
 
 export type AppContextProps = {
-  appType: 'standalone' | 'ocp' | 'aap';
-  qcow2ImgUrl: string | undefined;
-  bootcImgUrl: string | undefined;
+  appType: FlightCtlApp;
   user?: string; // auth?.user?.profile.preferred_username
   i18n: {
     transNamespace?: string;
+  };
+  settings: {
+    isRHEM?: boolean;
   };
   router: {
     useNavigate: () => RouterNavigateFunction;
@@ -60,21 +69,24 @@ export type AppContextProps = {
     Prompt?: PromptFC;
   };
   fetch: {
-    getWsEndpoint: () => { wsEndpoint: string; protocols: string[] };
+    getWsEndpoint: (deviceId: string) => string;
     get: <R>(kind: string, abortSignal?: AbortSignal) => Promise<R>;
     post: <R>(kind: string, data: R, abortSignal?: AbortSignal) => Promise<R>;
+    put: <R>(kind: string, data: R, abortSignal?: AbortSignal) => Promise<R>;
     remove: <R>(kind: string, abortSignal?: AbortSignal) => Promise<R>;
     patch: <R>(kind: string, patches: PatchRequest, abortSignal?: AbortSignal) => Promise<R>;
+    checkPermissions: (resource: RESOURCE, verb: VERB) => Promise<boolean>;
   };
-  metrics: {
-    get: <R>(query: string, abortSignal?: AbortSignal) => Promise<R>;
-  };
+  // Extra fetch functions
+  getMetrics?: <R>(query: string, abortSignal?: AbortSignal) => Promise<R>;
+  getCliArtifacts?: (abortSignal?: AbortSignal) => Promise<CliArtifactsResponse>;
 };
 
 export const AppContext = React.createContext<AppContextProps>({
-  appType: 'standalone',
-  qcow2ImgUrl: undefined,
-  bootcImgUrl: undefined,
+  appType: FlightCtlApp.STANDALONE,
+  settings: {
+    isRHEM: false,
+  },
   router: {
     useNavigate,
     Link,
@@ -93,14 +105,13 @@ export const AppContext = React.createContext<AppContextProps>({
   },
   /* eslint-disable */
   fetch: {
-    getWsEndpoint: () => ({ wsEndpoint: '', protocols: [''] }),
+    getWsEndpoint: () => '',
     get: async () => ({}) as any,
     post: async () => ({}) as any,
+    put: async () => ({}) as any,
     remove: async () => ({}) as any,
     patch: async () => ({}) as any,
-  },
-  metrics: {
-    get: async () => ({}) as any,
+    checkPermissions: async () => true,
   },
   /* eslint-enable */
 });

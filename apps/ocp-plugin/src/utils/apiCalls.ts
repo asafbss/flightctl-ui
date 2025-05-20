@@ -2,10 +2,12 @@
 
 import { PatchRequest } from '@flightctl/types';
 import { getCSRFToken } from '@openshift-console/dynamic-plugin-sdk/lib/utils/fetch/console-fetch-utils';
+import { getErrorMsgFromApiResponse } from '@flightctl/ui-components/src/utils/apiCalls';
 
 declare global {
   interface Window {
     FCTL_API_PORT?: string;
+    isRHEM?: boolean;
   }
 }
 
@@ -23,12 +25,12 @@ const apiServer = `${window.location.hostname}${
   window.FCTL_API_PORT ? `:${window.FCTL_API_PORT}` : ''
 }/api/proxy/plugin/flightctl-plugin/api-proxy`;
 
-const flightCtlAPI = `${window.location.protocol}//${apiServer}/api/flightctl`;
-const metricsAPI = `${window.location.protocol}//${apiServer}/api/metrics`;
+export const uiProxy = `${window.location.protocol}//${apiServer}`;
+const flightCtlAPI = `${uiProxy}/api/flightctl`;
+const metricsAPI = `${uiProxy}/api/metrics`;
 export const wsEndpoint = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${apiServer}`;
-const deviceImagesAPI = `${window.location.protocol}//${apiServer}/api/device-images`;
 
-const handleApiJSONResponse = async <R>(response: Response): Promise<R> => {
+export const handleApiJSONResponse = async <R>(response: Response): Promise<R> => {
   if (response.ok) {
     const data = (await response.json()) as R;
     return data;
@@ -39,14 +41,7 @@ const handleApiJSONResponse = async <R>(response: Response): Promise<R> => {
     throw new Error(`Error ${response.status}: ${response.statusText}`);
   }
 
-  let errorText = '';
-  try {
-    const json = (await response.json()) as { message: string } | string;
-    errorText = ` - ${typeof json === 'object' ? json.message : json}`;
-  } catch (e) {
-    // ignore
-  }
-  throw new Error(`Error ${response.status}: ${response.statusText}${errorText}`);
+  throw new Error(await getErrorMsgFromApiResponse(response));
 };
 
 export const fetchMetrics = async <R>(metricQuery: string, abortSignal?: AbortSignal): Promise<R> => {
@@ -56,17 +51,17 @@ export const fetchMetrics = async <R>(metricQuery: string, abortSignal?: AbortSi
     });
     return handleApiJSONResponse(response);
   } catch (error) {
-    console.error('Error making request:', error);
+    console.error('Error making GET request:', error);
     throw error;
   }
 };
 
-export const postData = async <R>(kind: string, data: R): Promise<R> => {
+const putOrPostData = async <R>(kind: string, data: R, method: 'PUT' | 'POST'): Promise<R> => {
   const options: RequestInit = {
     headers: {
       'Content-Type': 'application/json',
     },
-    method: 'POST',
+    method,
     body: JSON.stringify(data),
   };
   applyConsoleHeaders(options);
@@ -74,10 +69,14 @@ export const postData = async <R>(kind: string, data: R): Promise<R> => {
     const response = await fetch(`${flightCtlAPI}/api/v1/${kind}`, options);
     return handleApiJSONResponse(response);
   } catch (error) {
-    console.error('Error making request:', error);
+    console.error(`Error making ${method} request for ${kind}:`, error);
     throw error;
   }
 };
+
+export const postData = async <R>(kind: string, data: R): Promise<R> => putOrPostData(kind, data, 'POST');
+
+export const putData = async <R>(kind: string, data: R): Promise<R> => putOrPostData(kind, data, 'PUT');
 
 export const deleteData = async <R>(kind: string, abortSignal?: AbortSignal): Promise<R> => {
   const options: RequestInit = {
@@ -89,7 +88,7 @@ export const deleteData = async <R>(kind: string, abortSignal?: AbortSignal): Pr
     const response = await fetch(`${flightCtlAPI}/api/v1/${kind}`, options);
     return handleApiJSONResponse(response);
   } catch (error) {
-    console.error('Error making request:', error);
+    console.error('Error making DELETE request:', error);
     throw error;
   }
 };
@@ -108,7 +107,7 @@ export const patchData = async <R>(kind: string, data: PatchRequest, abortSignal
     const response = await fetch(`${flightCtlAPI}/api/v1/${kind}`, options);
     return handleApiJSONResponse(response);
   } catch (error) {
-    console.error('Error making request:', error);
+    console.error('Error making PATCH request:', error);
     throw error;
   }
 };
@@ -120,22 +119,7 @@ export const fetchData = async <R>(kind: string, abortSignal?: AbortSignal): Pro
     });
     return handleApiJSONResponse(response);
   } catch (error) {
-    console.error('Error making request:', error);
-    throw error;
-  }
-};
-
-export type DeviceImages = {
-  bootc: string;
-  qcow2: string;
-};
-
-export const fetchImages = async () => {
-  try {
-    const response = await fetch(deviceImagesAPI);
-    return handleApiJSONResponse<DeviceImages>(response);
-  } catch (error) {
-    console.error('Error making request:', error);
+    console.error('Error making GET request:', error);
     throw error;
   }
 };

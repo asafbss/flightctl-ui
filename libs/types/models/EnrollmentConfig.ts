@@ -5,6 +5,5 @@
 import type { EnrollmentService } from './EnrollmentService';
 export type EnrollmentConfig = {
   'enrollment-service': EnrollmentService;
-  'grpc-management-endpoint': string;
 };
 

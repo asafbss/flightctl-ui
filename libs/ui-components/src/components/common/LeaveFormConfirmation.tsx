@@ -1,10 +1,12 @@
 import * as React from 'react';
-import { Button, Modal, Stack, StackItem, Text, TextContent } from '@patternfly/react-core';
+import { Button, Text, TextContent } from '@patternfly/react-core';
+import { Modal, ModalBody, ModalFooter, ModalHeader } from '@patternfly/react-core/next';
+
 import { Blocker, BlockerFunction } from 'react-router-dom';
 import { useFormikContext } from 'formik';
 
 import { useTranslation } from '../../hooks/useTranslation';
-import { useAppContext } from '../../hooks/useAppContext';
+import { FlightCtlApp, useAppContext } from '../../hooks/useAppContext';
 
 const ConfirmNavigationDialog = ({ blocker }: { blocker: Blocker }) => {
   const { t } = useTranslation();
@@ -14,12 +16,14 @@ const ConfirmNavigationDialog = ({ blocker }: { blocker: Blocker }) => {
   }
 
   return (
-    <Modal
-      title={t('There are unsaved changes')}
-      isOpen
-      variant="small"
-      titleIconVariant="warning"
-      actions={[
+    <Modal isOpen variant="small">
+      <ModalHeader title={t('There are unsaved changes')} titleIconVariant="warning" />
+      <ModalBody>
+        <TextContent>
+          <Text>{t('Are you sure you want to leave the current page? Unsaved changes will be lost.')}</Text>
+        </TextContent>
+      </ModalBody>
+      <ModalFooter>
         <Button
           key="proceed"
           variant="danger"
@@ -28,7 +32,7 @@ const ConfirmNavigationDialog = ({ blocker }: { blocker: Blocker }) => {
           }}
         >
           {t('Discard changes')}
-        </Button>,
+        </Button>
         <Button
           key="stay"
           variant="link"
@@ -37,16 +41,8 @@ const ConfirmNavigationDialog = ({ blocker }: { blocker: Blocker }) => {
           }}
         >
           {t('Stay here')}
-        </Button>,
-      ]}
-    >
-      <Stack hasGutter>
-        <StackItem>
-          <TextContent>
-            <Text>{t('Are you sure you want to leave the current page? Unsaved changes will be lost.')}</Text>
-          </TextContent>
-        </StackItem>
-      </Stack>
+        </Button>
+      </ModalFooter>
     </Modal>
   );
 };
@@ -85,7 +81,7 @@ const LeaveFormConfirmation = () => {
 
   const lock = !isSubmitting && dirty;
 
-  if (appType === 'aap') {
+  if (appType === FlightCtlApp.AAP) {
     return null;
   }
 

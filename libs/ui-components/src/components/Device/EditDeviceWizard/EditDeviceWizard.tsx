@@ -14,22 +14,28 @@ import {
 } from '@patternfly/react-core';
 
 import { Device } from '@flightctl/types';
-import { EditDeviceFormValues } from './types';
+import { getUpdatePolicyValues } from '../../Fleet/CreateFleet/fleetSpecUtils';
+import { EditDeviceFormValues } from './../../../types/deviceSpec';
 import { getErrorMessage } from '../../../utils/error';
 import { fromAPILabel } from '../../../utils/labels';
+import { getEditDisabledReason } from '../../../utils/devices';
 import { useTranslation } from '../../../hooks/useTranslation';
 import { Link, ROUTE, useNavigate } from '../../../hooks/useNavigate';
 import LeaveFormConfirmation from '../../common/LeaveFormConfirmation';
 import ErrorBoundary from '../../common/ErrorBoundary';
 import GeneralInfoStep, { generalInfoStepId, isGeneralInfoStepValid } from './steps/GeneralInfoStep';
 import DeviceTemplateStep, { deviceTemplateStepId, isDeviceTemplateStepValid } from './steps/DeviceTemplateStep';
+import DeviceUpdateStep, { deviceUpdatePolicyStepId, isUpdatePolicyStepValid } from './steps/DeviceUpdateStep';
 import ReviewDeviceStep, { reviewDeviceStepId } from './steps/ReviewDeviceStep';
 import { getDevicePatches, getValidationSchema } from './utils';
-import { getApplicationValues, getConfigTemplatesValues } from './deviceSpecUtils';
+import { getApplicationValues, getConfigTemplatesValues, hasMicroshiftRegistrationConfig } from './deviceSpecUtils';
 import { useFetch } from '../../../hooks/useFetch';
 import { useEditDevice } from './useEditDevice';
 import EditDeviceWizardNav from './EditDeviceWizardNav';
 import EditDeviceWizardFooter from './EditDeviceWizardFooter';
+import PageWithPermissions from '../../common/PageWithPermissions';
+import { RESOURCE, VERB } from '../../../types/rbac';
+import { useAccessReview } from '../../../hooks/useAccessReview';
 
 import './EditDeviceWizard.css';
 
@@ -44,6 +50,8 @@ const EditDeviceWizard = () => {
   const deviceAlias = device?.metadata.labels?.alias || '';
   const displayText = device ? deviceAlias || t('Untitled') : deviceId;
 
+  const editDisabledReason = device ? getEditDisabledReason(device, t) : undefined;
+
   let body: React.ReactNode;
   if (isLoading) {
     body = (
@@ -57,23 +65,26 @@ const EditDeviceWizard = () => {
         {getErrorMessage(loadError)}
       </Alert>
     );
-  } else if (!!device?.metadata.owner) {
+  } else if (editDisabledReason) {
     body = (
       <Alert isInline variant="info" title={t('Device is non-editable')}>
-        {t('This device is managed by a fleet and it cannot be edited directly.')}
+        {editDisabledReason}
       </Alert>
     );
   } else if (device) {
+    const registerMicroShift = hasMicroshiftRegistrationConfig(device.spec);
     body = (
       <Formik<EditDeviceFormValues>
         initialValues={{
           deviceAlias,
-          osImage: device.spec?.os?.image,
+          osImage: device.spec?.os?.image || '',
           labels: fromAPILabel(device.metadata.labels || {}).filter((label) => label.key !== 'alias'),
-          configTemplates: getConfigTemplatesValues(device.spec),
+          configTemplates: getConfigTemplatesValues(device.spec, registerMicroShift),
           fleetMatch: '', // Initially this is always a fleetless device
           applications: getApplicationValues(device.spec),
           systemdUnits: [],
+          registerMicroShift,
+          updatePolicy: getUpdatePolicyValues(device.spec?.updatePolicy),
         }}
         validationSchema={getValidationSchema(t)}
         validateOnMount
@@ -93,9 +104,12 @@ const EditDeviceWizard = () => {
         {({ values, errors: formikErrors }) => {
           const generalStepValid = isGeneralInfoStepValid(formikErrors);
           const templateStepValid = isDeviceTemplateStepValid(formikErrors);
+          const updateStepValid = isUpdatePolicyStepValid(formikErrors);
 
           const canEditTemplate = !values.fleetMatch;
           const isTemplateStepDisabled = !(generalStepValid && canEditTemplate);
+          const isUpdateStepDisabled = !templateStepValid;
+
           return (
             <>
               <LeaveFormConfirmation />
@@ -103,6 +117,11 @@ const EditDeviceWizard = () => {
                 className="fctl-edit-device__wizard"
                 footer={<EditDeviceWizardFooter />}
                 nav={<EditDeviceWizardNav />}
+                onStepChange={() => {
+                  if (submitError) {
+                    setSubmitError(undefined);
+                  }
+                }}
               >
                 <WizardStep name={t('General info')} id={generalInfoStepId}>
                   <GeneralInfoStep />
@@ -110,7 +129,10 @@ const EditDeviceWizard = () => {
                 <WizardStep name={t('Device template')} id={deviceTemplateStepId} isDisabled={isTemplateStepDisabled}>
                   <DeviceTemplateStep isFleet={false} />
                 </WizardStep>
-                <WizardStep name={t('Review and update')} id={reviewDeviceStepId} isDisabled={!templateStepValid}>
+                <WizardStep name={t('Updates')} id={deviceUpdatePolicyStepId} isDisabled={isUpdateStepDisabled}>
+                  <DeviceUpdateStep />
+                </WizardStep>
+                <WizardStep name={t('Review and save')} id={reviewDeviceStepId} isDisabled={!updateStepValid}>
                   <ReviewDeviceStep error={submitError} />
                 </WizardStep>
               </Wizard>
@@ -148,4 +170,13 @@ const EditDeviceWizard = () => {
   );
 };
 
-export default EditDeviceWizard;
+const EditDeviceWizardWithPermissions = () => {
+  const [allowed, loading] = useAccessReview(RESOURCE.DEVICE, VERB.PATCH);
+  return (
+    <PageWithPermissions allowed={allowed} loading={loading}>
+      <EditDeviceWizard />
+    </PageWithPermissions>
+  );
+};
+
+export default EditDeviceWizardWithPermissions;

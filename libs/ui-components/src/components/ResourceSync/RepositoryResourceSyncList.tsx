@@ -6,14 +6,12 @@ import {
   EmptyStateActions,
   EmptyStateBody,
   EmptyStateFooter,
-  Modal,
-  SelectList,
-  SelectOption,
   Toolbar,
   ToolbarContent,
   ToolbarGroup,
   ToolbarItem,
 } from '@patternfly/react-core';
+import { Modal, ModalBody, ModalHeader } from '@patternfly/react-core/next';
 import { TFunction } from 'i18next';
 import { PlusCircleIcon } from '@patternfly/react-icons/dist/js/icons/plus-circle-icon';
 import { CodeBranchIcon } from '@patternfly/react-icons/dist/js/icons/code-branch-icon';
@@ -28,13 +26,13 @@ import Table, { TableColumn } from '../Table/Table';
 import { useTableTextSearch } from '../../hooks/useTableTextSearch';
 import TableTextSearch from '../Table/TableTextSearch';
 import { useTableSelect } from '../../hooks/useTableSelect';
-import TableActions from '../Table/TableActions';
 
 import MassDeleteResourceSyncModal from '../modals/massModals/MassDeleteResourceSyncModal/MassDeleteResourceSyncModal';
 import ResourceSyncStatus from './ResourceSyncStatus';
 import { useTranslation } from '../../hooks/useTranslation';
 import { useAppContext } from '../../hooks/useAppContext';
 import { getErrorMessage } from '../../utils/error';
+import { commonQueries } from '../../utils/query';
 
 import {
   SingleResourceSyncValues,
@@ -46,6 +44,8 @@ import FlightCtlActionGroup from '../form/FlightCtlActionGroup';
 import FlightCtlForm from '../form/FlightCtlForm';
 import ResourceListEmptyState from '../common/ResourceListEmptyState';
 import ListPageBody from '../ListPage/ListPageBody';
+import { useAccessReview } from '../../hooks/useAccessReview';
+import { RESOURCE, VERB } from '../../types/rbac';
 
 import './RepositoryResourceSyncList.css';
 
@@ -79,22 +79,24 @@ const createRefs = (rsList: ResourceSync[]): { [key: string]: React.RefObject<HT
 
 const getSearchText = (resourceSync: ResourceSync) => [resourceSync.metadata.name];
 
-const ResourceSyncEmptyState = ({ addResourceSync }: { addResourceSync: VoidFunction }) => {
+const ResourceSyncEmptyState = ({ addResourceSync }: { addResourceSync?: VoidFunction }) => {
   const { t } = useTranslation();
   return (
     <ResourceListEmptyState icon={CodeBranchIcon} titleText={t('No resource syncs here!')}>
       <EmptyStateBody>
         {t(
-          "A resource sync is an automated Gitops way to manage imported fleets. The resource syncs monitors changes made to the source repository and updates the fleets' configurations accordingly.",
+          'A resource sync is an automated Gitops method that helps manage your imported fleets by monitoring source repository changes and updating your fleet configuration accordingly.',
         )}
       </EmptyStateBody>
-      <EmptyStateFooter>
-        <EmptyStateActions>
-          <Button variant="secondary" onClick={addResourceSync}>
-            {t('Add a resource sync')}
-          </Button>
-        </EmptyStateActions>
-      </EmptyStateFooter>
+      {addResourceSync && (
+        <EmptyStateFooter>
+          <EmptyStateActions>
+            <Button variant="secondary" onClick={addResourceSync}>
+              {t('Add a resource sync')}
+            </Button>
+          </EmptyStateActions>
+        </EmptyStateFooter>
+      )}
     </ResourceListEmptyState>
   );
 };
@@ -134,37 +136,40 @@ const CreateResourceSyncModal = ({
   const [submitError, setSubmitError] = React.useState<string | undefined>();
 
   return (
-    <Modal variant="medium" title={t('Add a resource sync')} onClose={() => onClose()} isOpen>
-      <Formik<SingleResourceSyncValues>
-        initialValues={{ resourceSyncs: [{ name: '', targetRevision: '', path: '' }] }}
-        validationSchema={singleResourceSyncSchema(t, storedRSs)}
-        onSubmit={async (values: SingleResourceSyncValues) => {
-          const rsToAdd = getResourceSync(repositoryId, values.resourceSyncs[0]);
-          try {
-            await post<ResourceSync>('resourcesyncs', rsToAdd);
-            setSubmitError(undefined);
-            onClose(true);
-          } catch (e) {
-            setSubmitError(getErrorMessage(e));
-          }
-        }}
-      >
-        <>
-          <CreateResourceSyncModalForm onClose={onClose} />
-          {submitError && (
-            <Alert variant="danger" title={t('Unexpected error occurred')} isInline>
-              {submitError}
-            </Alert>
-          )}
-        </>
-      </Formik>
+    <Modal variant="medium" onClose={() => onClose()} isOpen>
+      <ModalHeader title={t('Add a resource sync')} />
+      <ModalBody>
+        <Formik<SingleResourceSyncValues>
+          initialValues={{ resourceSyncs: [{ name: '', targetRevision: '', path: '' }] }}
+          validationSchema={singleResourceSyncSchema(t, storedRSs)}
+          onSubmit={async (values: SingleResourceSyncValues) => {
+            const rsToAdd = getResourceSync(repositoryId, values.resourceSyncs[0]);
+            try {
+              await post<ResourceSync>('resourcesyncs', rsToAdd);
+              setSubmitError(undefined);
+              onClose(true);
+            } catch (e) {
+              setSubmitError(getErrorMessage(e));
+            }
+          }}
+        >
+          <>
+            <CreateResourceSyncModalForm onClose={onClose} />
+            {submitError && (
+              <Alert variant="danger" title={t('Unexpected error occurred')} isInline>
+                {submitError}
+              </Alert>
+            )}
+          </>
+        </Formik>
+      </ModalBody>
     </Modal>
   );
 };
 
 const RepositoryResourceSyncList = ({ repositoryId }: { repositoryId: string }) => {
   const [rsList, isLoading, error, refetch] = useFetchPeriodically<ResourceSyncList>({
-    endpoint: `resourcesyncs?fieldSelector=spec.repository=${repositoryId}&sortBy=metadata.name&sortOrder=Asc`,
+    endpoint: commonQueries.getResourceSyncsByRepo(repositoryId),
   });
 
   const resourceSyncs = rsList?.items || [];
@@ -193,15 +198,18 @@ const RepositoryResourceSyncList = ({ repositoryId }: { repositoryId: string }) 
 
   const { onRowSelect, hasSelectedRows, isAllSelected, isRowSelected, setAllSelected } = useTableSelect();
 
-  const { deleteAction, deleteModal } = useDeleteListAction({
+  const { action: deleteAction, modal: deleteModal } = useDeleteListAction({
     resourceType: 'ResourceSync',
-    onDelete: async (resourceId: string) => {
+    onConfirm: async (resourceId: string) => {
       await remove(`resourcesyncs/${resourceId}`);
       refetch();
     },
   });
   const [isMassDeleteModalOpen, setIsMassDeleteModalOpen] = React.useState(false);
   const [isAddRsModalOpen, setIsAddRsModalOpen] = React.useState(false);
+
+  const [canDelete] = useAccessReview(RESOURCE.RESOURCE_SYNC, VERB.DELETE);
+  const [canCreate] = useAccessReview(RESOURCE.RESOURCE_SYNC, VERB.CREATE);
 
   return (
     <ListPageBody error={error} loading={isLoading}>
@@ -212,16 +220,16 @@ const RepositoryResourceSyncList = ({ repositoryId }: { repositoryId: string }) 
               <TableTextSearch value={search} setValue={setSearch} placeholder={t('Search by name')} />
             </ToolbarItem>
           </ToolbarGroup>
-          <ToolbarItem>
-            <TableActions isDisabled={!hasSelectedRows}>
-              <SelectList>
-                <SelectOption onClick={() => setIsMassDeleteModalOpen(true)}>{t('Delete')}</SelectOption>
-              </SelectList>
-            </TableActions>
-          </ToolbarItem>
+          {canDelete && (
+            <ToolbarItem>
+              <Button isDisabled={!hasSelectedRows} onClick={() => setIsMassDeleteModalOpen(true)} variant="secondary">
+                {t('Delete resource syncs')}
+              </Button>
+            </ToolbarItem>
+          )}
         </ToolbarContent>
       </Toolbar>
-      {resourceSyncs.length > 0 && (
+      {canCreate && resourceSyncs.length > 0 && (
         <Button
           variant="link"
           icon={<PlusCircleIcon />}
@@ -239,8 +247,9 @@ const RepositoryResourceSyncList = ({ repositoryId }: { repositoryId: string }) 
         isAllSelected={isAllSelected}
         onSelectAll={setAllSelected}
         columns={columns}
-        emptyFilters={filteredData.length === 0}
-        emptyData={resourceSyncs.length === 0}
+        hasFilters={!!search}
+        emptyData={filteredData.length === 0}
+        clearFilters={() => setSearch('')}
       >
         <Tbody>
           {filteredData.map((resourceSync, rowIndex) => {
@@ -263,9 +272,11 @@ const RepositoryResourceSyncList = ({ repositoryId }: { repositoryId: string }) 
                   <ResourceSyncStatus resourceSync={resourceSync} />
                 </Td>
                 <Td dataLabel={t('Observed hash')}>{getObservedHash(resourceSync)}</Td>
-                <Td isActionCell>
-                  <ActionsColumn items={[deleteAction({ resourceId: resourceSync.metadata.name || '' })]} />
-                </Td>
+                {canDelete && (
+                  <Td isActionCell>
+                    <ActionsColumn items={[deleteAction({ resourceId: resourceSync.metadata.name || '' })]} />
+                  </Td>
+                )}
               </Tr>
             );
           })}
@@ -273,9 +284,13 @@ const RepositoryResourceSyncList = ({ repositoryId }: { repositoryId: string }) 
       </Table>
       {resourceSyncs.length === 0 && (
         <ResourceSyncEmptyState
-          addResourceSync={() => {
-            setIsAddRsModalOpen(true);
-          }}
+          addResourceSync={
+            canCreate
+              ? () => {
+                  setIsAddRsModalOpen(true);
+                }
+              : undefined
+          }
         />
       )}
       {deleteModal}

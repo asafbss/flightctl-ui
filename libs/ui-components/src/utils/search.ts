@@ -1,7 +1,8 @@
 import fuzzy from 'fuzzysearch';
+import { API_VERSION } from '../constants';
 
 // Must be an even number for "getSearchResultsCount" to work
-const MAX_TOTAL_SEARCH_RESULTS = 10;
+export const MAX_TOTAL_SEARCH_RESULTS = 10;
 
 export const fuzzySeach = (filter: string | undefined, value?: string): boolean => {
   if (!filter) {
@@ -23,3 +24,10 @@ export const getSearchResultsCount = (labelCount: number, fleetCount: number) =>
   const rest = MAX_TOTAL_SEARCH_RESULTS - min;
   return labelCount === min ? [labelCount, rest] : [rest, fleetCount];
 };
+
+export const getEmptyFleetSearch = () => ({
+  apiVersion: API_VERSION,
+  kind: 'Fleet',
+  metadata: {},
+  items: [],
+});

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Button, FormGroup, FormSection, Grid, Split, SplitItem } from '@patternfly/react-core';
+import { Button, FormGroup, Grid, Split, SplitItem } from '@patternfly/react-core';
 import { PlusCircleIcon } from '@patternfly/react-icons/dist/js/icons/plus-circle-icon';
 import { MinusCircleIcon } from '@patternfly/react-icons/dist/js/icons/minus-circle-icon';
 import { FieldArray, useField, useFormikContext } from 'formik';
@@ -10,8 +10,7 @@ import TextField from '../../../form/TextField';
 import UploadField from '../../../form/UploadField';
 import CheckboxField from '../../../form/CheckboxField';
 import ExpandableFormSection from '../../../form/ExpandableFormSection';
-import { DeviceSpecConfigFormValues } from '../types';
-import { InlineConfigTemplate } from '../../../../types/deviceSpec';
+import { DeviceSpecConfigFormValues, InlineConfigTemplate } from '../../../../types/deviceSpec';
 import { formatFileMode } from '../deviceSpecUtils';
 
 const MAX_INLINE_FILE_SIZE_BYTES = 1024 * 1024;
@@ -49,12 +48,7 @@ const FileForm = ({ fieldName, index }: { fieldName: string; index: number }) =>
         <FormGroup label={t('File path on the device')} isRequired>
           <TextField name={`${fieldName}.path`} />
         </FormGroup>
-        <UploadField
-          label={t('Content')}
-          name={`${fieldName}.content`}
-          maxFileBytes={MAX_INLINE_FILE_SIZE_BYTES}
-          isRequired
-        />
+        <UploadField label={t('Content')} name={`${fieldName}.content`} maxFileBytes={MAX_INLINE_FILE_SIZE_BYTES} />
         <FormGroup>
           <CheckboxField name={`${fieldName}.base64`} label={t('Content is base64 encoded')} />
         </FormGroup>
@@ -65,20 +59,18 @@ const FileForm = ({ fieldName, index }: { fieldName: string; index: number }) =>
             helperText={t('Select from the list or type in the permission code in octal notation')}
             defaultId="0644"
             items={permissions}
-            validateNewItem={(value) => {
+            isValidTypedItem={(value) => {
               try {
-                if (value !== '' && value.length <= 4) {
+                if (value !== '' && value.length === 4) {
                   const valNum = Number(`0o${value}`);
-                  if (isFinite(valNum) && valNum >= 0 && valNum <= 0o7777) {
-                    return undefined;
-                  }
+                  return Number.isFinite(valNum) && valNum >= 0 && valNum <= 0o7777;
                 }
               } catch {
-                return t('Invalid permissions');
+                return false;
               }
-              return t('Invalid permissions');
+              return false;
             }}
-            transformNewItem={formatFileMode}
+            transformTypedItem={formatFileMode}
           />
         </FormGroup>
         <FormGroup label={t('User')}>
@@ -126,6 +118,7 @@ const ConfigInlineTemplateForm = ({ index }: ConfigInlineTemplateFormProps) => {
                 {inlineConfig.files.length > 1 && (
                   <SplitItem>
                     <Button
+                      aria-label={t('Delete file')}
                       variant="link"
                       icon={<MinusCircleIcon />}
                       iconPosition="start"
@@ -136,23 +129,21 @@ const ConfigInlineTemplateForm = ({ index }: ConfigInlineTemplateFormProps) => {
               </Split>
             );
           })}
-          <FormSection>
-            <FormGroup>
-              <Button
-                variant="link"
-                icon={<PlusCircleIcon />}
-                iconPosition="start"
-                onClick={() => {
-                  push({
-                    path: '',
-                    content: '',
-                  });
-                }}
-              >
-                {t('Add file')}
-              </Button>
-            </FormGroup>
-          </FormSection>
+          <FormGroup>
+            <Button
+              variant="link"
+              icon={<PlusCircleIcon />}
+              iconPosition="start"
+              onClick={() => {
+                push({
+                  path: '',
+                  content: '',
+                });
+              }}
+            >
+              {t('Add file')}
+            </Button>
+          </FormGroup>
         </>
       )}
     </FieldArray>

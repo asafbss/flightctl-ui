@@ -1,17 +1,27 @@
 import {
+  AppType,
+  // eslint-disable-next-line no-restricted-imports
+  ApplicationProviderSpec,
+  ConfigProviderSpec,
   DeviceSpec,
+  EncodingType,
   FileSpec,
   GitConfigProviderSpec,
   HttpConfigProviderSpec,
+  InlineApplicationProviderSpec,
   InlineConfigProviderSpec,
   KubernetesSecretProviderSpec,
   PatchRequest,
 } from '@flightctl/types';
 import {
+  AppForm,
+  AppSpecType,
   ConfigSourceProvider,
   ConfigType,
   GitConfigTemplate,
   HttpConfigTemplate,
+  ImageAppForm,
+  InlineAppForm,
   InlineConfigTemplate,
   KubeSecretTemplate,
   SpecConfigTemplate,
@@ -19,15 +29,38 @@ import {
   isGitProviderSpec,
   isHttpConfigTemplate,
   isHttpProviderSpec,
+  isImageAppForm,
+  isImageAppProvider,
   isInlineProviderSpec,
   isKubeProviderSpec,
   isKubeSecretTemplate,
 } from '../../../types/deviceSpec';
-import { ApplicationFormSpec } from './types';
+import { ApplicationProviderSpecFixed, InlineApplicationFileFixed } from '../../../types/extraTypes';
 
 const DEFAULT_INLINE_FILE_MODE = 420; // In Octal: 0644
 const DEFAULT_INLINE_FILE_USER = 'root';
 const DEFAULT_INLINE_FILE_GROUP = 'root';
+
+export const ACM_REPO_NAME = 'acm-registration';
+const ACM_CRD_YAML_PATH = '/var/local/acm-import/crd.yaml';
+const ACM_IMPORT_YAML_PATH = '/var/local/acm-import/import.yaml';
+const ACM_REPO_SUFFIX = `/agent-registration/manifests/`;
+
+const MICROSHIFT_REGISTRATION_HOOK_NAME = 'apply-acm-manifests';
+const MICROSHIFT_REGISTRATION_HOOK_FILE = '/etc/flightctl/hooks.d/afterupdating/50-acm-registration.yaml';
+const MICROSHIFT_REGISTRATION_HOOK = `- if:
+  - path: /var/local/acm-import/crd.yaml
+    op: [created]
+  run: kubectl apply -f /var/local/acm-import/crd.yaml
+  envVars:
+    KUBECONFIG: /var/lib/microshift/resources/kubeadmin/kubeconfig
+- if:
+  - path: /var/local/acm-import/import.yaml
+    op: [created]
+  run: kubectl apply -f /var/local/acm-import/import.yaml
+  envVars:
+    KUBECONFIG: /var/lib/microshift/resources/kubeadmin/kubeconfig
+`;
 
 export const getConfigType = (config: ConfigSourceProvider): ConfigType | undefined => {
   if (isGitProviderSpec(config)) {
@@ -94,11 +127,7 @@ const isSameInlineConf = (a: InlineConfigProviderSpec, b: InlineConfigProviderSp
         isSameInlineConfigValue<string>(aInline.user, bInline.user, DEFAULT_INLINE_FILE_USER) &&
         isSameInlineConfigValue<string>(aInline.group, bInline.group, DEFAULT_INLINE_FILE_GROUP) &&
         isSameInlineConfigValue<number>(aInline.mode, bInline.mode, DEFAULT_INLINE_FILE_MODE) &&
-        isSameInlineConfigValue<string>(
-          aInline.contentEncoding,
-          bInline.contentEncoding,
-          FileSpec.contentEncoding.PLAIN,
-        ) &&
+        isSameInlineConfigValue<string>(aInline.contentEncoding, bInline.contentEncoding, EncodingType.EncodingPlain) &&
         aInline.content === bInline.content
       );
     })
@@ -166,7 +195,117 @@ export const getDeviceSpecConfigPatches = (
   return allPatches;
 };
 
-export const getAPIConfig = (ct: SpecConfigTemplate): ConfigSourceProvider => {
+export const toAPIApplication = (app: AppForm): ApplicationProviderSpec => {
+  const envVars = app.variables.reduce((acc, variable) => {
+    acc[variable.name] = variable.value;
+    return acc;
+  }, {});
+
+  if (isImageAppForm(app)) {
+    const data = {
+      image: app.image,
+      envVars,
+    };
+    return app.name ? { ...data, name: app.name } : data;
+  }
+
+  return {
+    name: app.name,
+    appType: AppType.AppTypeCompose,
+    inline: app.files.map(
+      (file): InlineApplicationFileFixed => ({
+        path: file.path,
+        content: file.content || '',
+        contentEncoding: file.base64 ? EncodingType.EncodingBase64 : EncodingType.EncodingPlain,
+      }),
+    ),
+    envVars,
+  };
+};
+
+const hasInlineApplicationChanged = (currentApp: InlineApplicationProviderSpec, updatedApp: InlineAppForm) => {
+  if (currentApp.inline.length != updatedApp.files.length) {
+    return true;
+  }
+  return currentApp.inline.some((file, index) => {
+    const updatedFile = updatedApp.files[index];
+    const isCurrentBase64 = file.contentEncoding === EncodingType.EncodingBase64;
+    return (
+      (updatedFile.base64 || false) !== isCurrentBase64 ||
+      updatedFile.path !== file.path ||
+      updatedFile.content !== file.content
+    );
+  });
+};
+
+export const getApplicationPatches = (
+  basePath: string,
+  currentApps: ApplicationProviderSpec[],
+  updatedApps: AppForm[],
+) => {
+  const patches: PatchRequest = [];
+
+  const currentLen = currentApps.length;
+  const newLen = updatedApps.length;
+  if (currentLen === 0 && newLen > 0) {
+    // First apps(s) have been added
+    patches.push({
+      path: `${basePath}/applications`,
+      op: 'add',
+      value: updatedApps.map(toAPIApplication),
+    });
+  } else if (currentLen > 0 && newLen === 0) {
+    // Last app(s) have been removed
+    patches.push({
+      path: `${basePath}/applications`,
+      op: 'remove',
+    });
+  } else if (currentLen !== newLen) {
+    patches.push({
+      path: `${basePath}/applications`,
+      op: 'replace',
+      value: updatedApps.map(toAPIApplication),
+    });
+  } else {
+    const needsPatch = currentApps.some((currentApp, index) => {
+      const updatedApp = updatedApps[index];
+      const isCurrentImageApp = isImageAppProvider(currentApp);
+      const currentAppSpecType = isCurrentImageApp ? AppSpecType.OCI_IMAGE : AppSpecType.INLINE;
+      if (currentAppSpecType !== updatedApp.specType || updatedApp.name !== currentApp.name) {
+        return true;
+      }
+      const currentVars = Object.entries(currentApp.envVars || {});
+      if (currentVars.length !== updatedApp.variables.length) {
+        return true;
+      } else {
+        const hasChangedVars = updatedApp.variables.some((variable) => {
+          const currentValue = currentApp.envVars ? currentApp.envVars[variable.name] : undefined;
+          return !currentValue || currentValue !== variable.value;
+        });
+        if (hasChangedVars) {
+          return true;
+        }
+      }
+
+      if (isCurrentImageApp) {
+        return (updatedApp as ImageAppForm).image !== currentApp.image;
+      }
+
+      return hasInlineApplicationChanged(currentApp, updatedApp as InlineAppForm);
+    });
+    if (needsPatch) {
+      patches.push({
+        path: `${basePath}/applications`,
+        op: 'replace',
+        value: updatedApps.map(toAPIApplication),
+      });
+    }
+  }
+
+  return patches;
+};
+
+export const getApiConfig = (ct: SpecConfigTemplate): ConfigSourceProvider => {
   if (isGitConfigTemplate(ct)) {
     return {
       name: ct.name,
@@ -201,78 +340,181 @@ export const getAPIConfig = (ct: SpecConfigTemplate): ConfigSourceProvider => {
   return {
     name: ct.name,
     inline: ct.files.map((file) => {
-      return {
+      const baseProps: FileSpec = {
         path: file.path,
         content: file.content,
-        group: file.group,
-        user: file.user,
         mode: file.permissions ? parseInt(file.permissions, 8) : undefined,
-        contentEncoding: file.base64 ? FileSpec.contentEncoding.BASE64 : undefined,
+        contentEncoding: file.base64 ? EncodingType.EncodingBase64 : undefined,
       };
+      // user / group fields cannot be sent as empty in PATCH operations
+      if (file.user) {
+        baseProps.user = file.user;
+      }
+      if (file.group) {
+        baseProps.group = file.group;
+      }
+      return baseProps;
     }),
   };
 };
 
-export const getApplicationValues = (deviceSpec?: DeviceSpec): ApplicationFormSpec[] => {
-  const map = deviceSpec?.applications || [];
-  return map.map((app) => {
+const getAppFormVariables = (app: ApplicationProviderSpecFixed) =>
+  Object.entries(app.envVars || {}).map(([varName, varValue]) => ({ name: varName, value: varValue }));
+
+export const getApplicationValues = (deviceSpec?: DeviceSpec): AppForm[] => {
+  const apps = deviceSpec?.applications || [];
+  return apps.map((app) => {
+    if (isImageAppProvider(app)) {
+      return {
+        specType: AppSpecType.OCI_IMAGE,
+        name: app.name || '',
+        image: app.image,
+        variables: getAppFormVariables(app),
+      };
+    }
     return {
+      specType: AppSpecType.INLINE,
       name: app.name || '',
-      image: app.image,
-      variables: Object.entries(app.envVars || {}).map(([varName, varValue]) => ({ name: varName, value: varValue })),
+      files: app.inline.map((file) => ({
+        path: file.path || '',
+        content: file.content,
+        base64: file.contentEncoding === EncodingType.EncodingBase64,
+      })),
+      variables: getAppFormVariables(app),
     };
   });
 };
 
-export const getConfigTemplatesValues = (deviceSpec?: DeviceSpec) =>
-  deviceSpec?.config?.map<SpecConfigTemplate>((c) => {
-    if (isGitProviderSpec(c)) {
-      return {
-        type: ConfigType.GIT,
-        name: c.name,
-        path: c.gitRef.path,
-        mountPath: c.gitRef.mountPath,
-        repository: c.gitRef.repository,
-        targetRevision: c.gitRef.targetRevision,
-      } as GitConfigTemplate;
-    }
-    if (isKubeProviderSpec(c)) {
-      return {
-        type: ConfigType.K8S_SECRET,
-        name: c.name,
-        mountPath: c.secretRef.mountPath,
-        secretName: c.secretRef.name,
-        secretNs: c.secretRef.namespace,
-      } as KubeSecretTemplate;
-    }
-    if (isHttpProviderSpec(c)) {
-      return {
-        type: ConfigType.HTTP,
-        name: c.name,
-        repository: c.httpRef.repository,
-        suffix: c.httpRef.suffix,
-        filePath: c.httpRef.filePath,
-      } as HttpConfigTemplate;
-    }
-
-    return {
-      type: ConfigType.INLINE,
-      name: c.name,
-      files: c.inline.map((inline) => {
+export const getConfigTemplatesValues = (deviceSpec?: DeviceSpec, registerMicroShift?: boolean) => {
+  const deviceConfig = registerMicroShift
+    ? deviceSpec?.config?.filter((c) => !isConfigACMCrd(c) && !isConfigACMImport(c) && !isMicroshiftRegistrationHook(c))
+    : deviceSpec?.config;
+  return (
+    deviceConfig?.map<SpecConfigTemplate>((c) => {
+      if (isGitProviderSpec(c)) {
         return {
-          user: inline.user,
-          group: inline.group,
-          path: inline.path,
-          permissions: inline.mode !== undefined ? formatFileMode(inline.mode) : undefined,
-          content: inline.content,
-          base64: inline.contentEncoding === FileSpec.contentEncoding.BASE64,
-        } as InlineConfigTemplate['files'][0];
-      }),
-    } as InlineConfigTemplate;
-  }) || [];
+          type: ConfigType.GIT,
+          name: c.name,
+          path: c.gitRef.path,
+          mountPath: c.gitRef.mountPath,
+          repository: c.gitRef.repository,
+          targetRevision: c.gitRef.targetRevision,
+        } as GitConfigTemplate;
+      }
+      if (isKubeProviderSpec(c)) {
+        return {
+          type: ConfigType.K8S_SECRET,
+          name: c.name,
+          mountPath: c.secretRef.mountPath,
+          secretName: c.secretRef.name,
+          secretNs: c.secretRef.namespace,
+        } as KubeSecretTemplate;
+      }
+      if (isHttpProviderSpec(c)) {
+        return {
+          type: ConfigType.HTTP,
+          name: c.name,
+          repository: c.httpRef.repository,
+          suffix: c.httpRef.suffix,
+          filePath: c.httpRef.filePath,
+        } as HttpConfigTemplate;
+      }
+
+      return {
+        type: ConfigType.INLINE,
+        name: c.name,
+        files: c.inline.map((inline) => {
+          return {
+            user: inline.user,
+            group: inline.group,
+            path: inline.path,
+            permissions: inline.mode !== undefined ? formatFileMode(inline.mode) : undefined,
+            content: inline.content,
+            base64: inline.contentEncoding === EncodingType.EncodingBase64,
+          } as InlineConfigTemplate['files'][0];
+        }),
+      } as InlineConfigTemplate;
+    }) || []
+  );
+};
 
 export const formatFileMode = (mode: string | number): string => {
   const modeStr = typeof mode === 'number' ? mode.toString(8) : mode;
   const prefixSize = 4 - modeStr.length;
   return prefixSize > 0 ? `${'0'.repeat(prefixSize)}${modeStr}` : modeStr;
+};
+
+export const ACMCrdConfig: HttpConfigProviderSpec = {
+  name: 'acm-crd',
+  httpRef: {
+    filePath: ACM_CRD_YAML_PATH,
+    repository: ACM_REPO_NAME,
+    suffix: '/agent-registration/crds/v1',
+  },
+};
+
+export const ACMImportConfig: HttpConfigProviderSpec = {
+  name: 'acm-registration',
+  httpRef: {
+    filePath: ACM_IMPORT_YAML_PATH,
+    repository: ACM_REPO_NAME,
+    suffix: `${ACM_REPO_SUFFIX}{{ .metadata.name }}`,
+  },
+};
+
+const isConfigACMCrd = (c: ConfigProviderSpec) => {
+  if (!isHttpProviderSpec(c)) {
+    return false;
+  }
+  return (
+    c.name === ACMCrdConfig.name &&
+    c.httpRef.filePath === ACMCrdConfig.httpRef.filePath &&
+    c.httpRef.repository === ACMCrdConfig.httpRef.repository &&
+    c.httpRef.suffix === ACMCrdConfig.httpRef.suffix
+  );
+};
+
+const isConfigACMImport = (c: ConfigProviderSpec) => {
+  if (!isHttpProviderSpec(c)) {
+    return false;
+  }
+  return (
+    c.name === ACMImportConfig.name &&
+    c.httpRef.filePath === ACMImportConfig.httpRef.filePath &&
+    c.httpRef.repository === ACMImportConfig.httpRef.repository &&
+    c.httpRef.suffix?.startsWith(ACM_REPO_SUFFIX)
+  );
+};
+
+const isMicroshiftRegistrationHook = (c: ConfigProviderSpec) => {
+  if (!isInlineProviderSpec(c)) {
+    return false;
+  }
+  return (
+    c.name === MICROSHIFT_REGISTRATION_HOOK_NAME &&
+    c.inline.length === 1 &&
+    c.inline[0].path === MICROSHIFT_REGISTRATION_HOOK_FILE &&
+    c.inline[0].content === MICROSHIFT_REGISTRATION_HOOK
+  );
+};
+
+export const MicroshiftRegistrationHook: InlineConfigProviderSpec = {
+  name: MICROSHIFT_REGISTRATION_HOOK_NAME,
+  inline: [
+    {
+      path: MICROSHIFT_REGISTRATION_HOOK_FILE,
+      content: MICROSHIFT_REGISTRATION_HOOK,
+    },
+  ],
+};
+
+export const hasMicroshiftRegistrationConfig = (deviceSpec?: DeviceSpec): boolean => {
+  if (!deviceSpec) {
+    return false;
+  }
+  const hasCrdsSpec = deviceSpec.config?.some(isConfigACMCrd);
+  const hasImportSpec = deviceSpec.config?.some(isConfigACMImport);
+  const hasRegistrationHook = deviceSpec.config?.some(isMicroshiftRegistrationHook);
+
+  return !!hasCrdsSpec && !!hasImportSpec && !!hasRegistrationHook;
 };

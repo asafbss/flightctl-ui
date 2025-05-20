@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { AppContextProps, NavLinkFC, appRoutes } from '@flightctl/ui-components/src/hooks/useAppContext';
+import { AppContextProps, FlightCtlApp, NavLinkFC, appRoutes } from '@flightctl/ui-components/src/hooks/useAppContext';
 import {
   Link,
   NavLink,
@@ -12,13 +12,12 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom';
-import { useFetch } from './useFetch';
-import { useMetrics } from './useMetrics';
-import { DeviceImages, fetchImages } from '../utils/apiCalls';
 import { AuthContext } from '../context/AuthContext';
+import { useFetch } from './useFetch';
+import { fetchCliArtifacts } from '../utils/apiCalls';
 
-const standaloneAppContext: Omit<AppContextProps, 'fetch' | 'metrics' | 'bootcImgUrl' | 'qcow2ImgUrl'> = {
-  appType: 'standalone',
+const standaloneAppContext: Omit<AppContextProps, 'fetch' | 'settings'> = {
+  appType: FlightCtlApp.STANDALONE,
   i18n: {
     transNamespace: undefined,
   },
@@ -40,34 +39,14 @@ const standaloneAppContext: Omit<AppContextProps, 'fetch' | 'metrics' | 'bootcIm
 export const useStandaloneAppContext = (): AppContextProps => {
   const { username } = React.useContext(AuthContext);
   const fetch = useFetch();
-  const metrics = useMetrics();
-
-  const [deviceImages, setDeviceImages] = React.useState<DeviceImages>({
-    qcow2: '',
-    bootc: '',
-  });
-
-  React.useEffect(() => {
-    const getImages = async () => {
-      try {
-        const imgs = await fetchImages();
-        setDeviceImages(imgs);
-      } catch (err) {
-        // eslint-disable-next-line
-        console.warn('Failed to fetch device images');
-        // eslint-disable-next-line
-        console.error(err);
-      }
-    };
-    getImages();
-  }, []);
 
   return {
     ...standaloneAppContext,
-    bootcImgUrl: deviceImages.bootc,
-    qcow2ImgUrl: deviceImages.qcow2,
+    settings: {
+      isRHEM: window.isRHEM || false,
+    },
     user: username,
     fetch,
-    metrics,
+    getCliArtifacts: fetchCliArtifacts,
   };
 };

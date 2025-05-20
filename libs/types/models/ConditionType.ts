@@ -2,6 +2,9 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+/**
+ * Type of condition in CamelCase.
+ */
 export enum ConditionType {
   EnrollmentRequestApproved = 'Approved',
   CertificateSigningRequestApproved = 'Approved',
@@ -13,8 +16,9 @@ export enum ConditionType {
   ResourceSyncSynced = 'Synced',
   FleetOverlappingSelectors = 'OverlappingSelectors',
   FleetValid = 'Valid',
+  FleetRolloutInProgress = 'RolloutInProgress',
   DeviceUpdating = 'Updating',
   DeviceSpecValid = 'SpecValid',
   DeviceMultipleOwners = 'MultipleOwners',
-  TemplateVersionValid = 'Valid'
+  DeviceDecommissioning = 'DeviceDecommissioning',
 }

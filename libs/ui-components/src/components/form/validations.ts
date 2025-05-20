@@ -4,21 +4,30 @@ import countBy from 'lodash/countBy';
 
 import { FlightCtlLabel } from '../../types/extraTypes';
 import {
+  AppForm,
+  AppSpecType,
+  BatchForm,
+  BatchLimitType,
+  DisruptionBudgetForm,
   GitConfigTemplate,
   HttpConfigTemplate,
+  ImageAppForm,
+  InlineAppForm,
   InlineConfigTemplate,
   KubeSecretTemplate,
+  RolloutPolicyForm,
   SpecConfigTemplate,
+  SystemdUnitFormValue,
+  UpdatePolicyForm,
+  getAppIdentifier,
   isGitConfigTemplate,
   isHttpConfigTemplate,
+  isInlineAppForm,
   isInlineConfigTemplate,
   isKubeSecretTemplate,
 } from '../../types/deviceSpec';
 import { labelToString } from '../../utils/labels';
-import { ApplicationFormSpec } from '../Device/EditDeviceWizard/types';
-import { SystemdUnitFormValue } from '../Device/SystemdUnitsModal/TrackSystemdUnitsForm';
-
-type UnvalidatedLabel = Partial<FlightCtlLabel>;
+import { UpdateScheduleMode } from '../../utils/time';
 
 const SYSTEMD_PATTERNS_REGEXP = /^[a-z][a-z0-9-_.]*$/;
 const SYSTEMD_UNITS_MAX_PATTERNS = 256;
@@ -33,8 +42,26 @@ const K8S_DNS_SUBDOMAIN_START_END = /^[a-z0-9](.*[a-z0-9])?$/;
 const K8S_DNS_SUBDOMAIN_ALLOWED_CHARACTERS = /^[a-z0-9.-]*$/;
 const K8S_DNS_SUBDOMAIN_VALUE_MAX_LENGTH = 253;
 
+// https://issues.redhat.com/browse/MGMT-18349 to make the validation more robust
+const BASIC_DEVICE_OS_IMAGE_REGEXP = /^[a-zA-Z0-9.\-\/:@_+]*$/;
+const APPLICATION_IMAGE_REGEXP = BASIC_DEVICE_OS_IMAGE_REGEXP;
+const APPLICATION_NAME_REGEXP = /^[a-z0-9]([-a-z0-9]*[a-z0-9])?$/;
+const APPLICATION_VAR_NAME_REGEXP = /^[a-zA-Z_]+[a-zA-Z0-9_]*$/;
+
+const TEMPLATE_VARIABLES_REGEXP = /{{.+?}}/g;
+// Special characters allowed: "dot", "pipe", "spaces" "quote", "backward slash", "underscore", "forward slash", "dash"
+const TEMPLATE_VARIABLES_CONTENT_REGEXP = /^([.a-zA-Z0-9|\s"\\_\/-])+$/;
+const TIME_VALUE_REGEXP = /^([01][0-9]|2[0-3]):([0-5][0-9])$/;
+
 const absolutePathRegex = /^\/.*$/;
+
+// Accepts only relative paths. Rejects paths that start with "/", have multiple "/", or use dots (./file, ../parent/file), etc
+const relativePathRegex = /^(?!\.\.\/|\.\.\$|\.\/)(\.\/)*[\w.-]+(?:\/[\w.-]+)*\/?$/;
+
 export const MAX_TARGET_REVISION_LENGTH = 244;
+const MAX_FILE_PATH_LENGTH = 253;
+
+const isInteger = (val: number | undefined) => val === undefined || Number.isInteger(val);
 
 export const getLabelValueValidations = (t: TFunction) => [
   { key: 'labelValueStartAndEnd', message: t('Starts and ends with a letter or a number.') },
@@ -44,7 +71,7 @@ export const getLabelValueValidations = (t: TFunction) => [
   },
   {
     key: 'labelValueMaxLength',
-    message: t('1-{{ maxCharacters }} characters', { maxCharacters: K8S_LABEL_VALUE_MAX_LENGTH }),
+    message: t('1-{{ maxCharacters }} characters.', { maxCharacters: K8S_LABEL_VALUE_MAX_LENGTH }),
   },
 ];
 
@@ -56,23 +83,9 @@ export const getDnsSubdomainValidations = (t: TFunction) => [
   },
   {
     key: 'dnsSubdomainMaxLength',
-    message: t('1-{{ maxCharacters }} characters', { maxCharacters: K8S_DNS_SUBDOMAIN_VALUE_MAX_LENGTH }),
+    message: t('1-{{ maxCharacters }} characters.', { maxCharacters: K8S_DNS_SUBDOMAIN_VALUE_MAX_LENGTH }),
   },
 ];
-
-export const getKubernetesLabelValueErrors = (labelValue: string) => {
-  const errorKeys: Record<string, string> = {};
-  if (!K8S_LABEL_VALUE_START_END.test(labelValue)) {
-    errorKeys.labelValueStartAndEnd = 'failed';
-  }
-  if (!K8S_LABEL_VALUE_ALLOWED_CHARACTERS.test(labelValue)) {
-    errorKeys.labelValueAllowedChars = 'failed';
-  }
-  if (labelValue?.length > K8S_LABEL_VALUE_MAX_LENGTH) {
-    errorKeys.labelValueMaxLength = 'failed';
-  }
-  return errorKeys;
-};
 
 export const getKubernetesDnsSubdomainErrors = (value: string) => {
   const errorKeys: Record<string, string> = {};
@@ -88,12 +101,12 @@ export const getKubernetesDnsSubdomainErrors = (value: string) => {
   return errorKeys;
 };
 
-export const hasUniqueLabelKeys = (labels: UnvalidatedLabel[]) => {
+export const hasUniqueLabelKeys = (labels: FlightCtlLabel[]) => {
   const uniqueKeys = new Set(labels.map((label) => label.key));
   return uniqueKeys.size === labels.length;
 };
 
-export const getInvalidKubernetesLabels = (labels: UnvalidatedLabel[]) => {
+export const getInvalidKubernetesLabels = (labels: FlightCtlLabel[]) => {
   return labels.filter((unvalidatedLabel) => {
     const key = unvalidatedLabel.key || '';
     const value = unvalidatedLabel.value || '';
@@ -186,17 +199,55 @@ export const validKubernetesLabelValue = (
 export const maxLengthString = (t: TFunction, props: { maxLength: number; fieldName: string }) =>
   Yup.string().max(props.maxLength, t('{{ fieldName }} must not exceed {{ maxLength }} characters', props));
 
-export const validLabelsSchema = (t: TFunction) =>
+export const validOsImage = (t: TFunction, { isFleet }: { isFleet: boolean }) =>
+  maxLengthString(t, { fieldName: t('System image'), maxLength: 2048 }).test(
+    'osImageValidations',
+    t('System image is invalid'),
+    (osImage: string | undefined) => {
+      if (!osImage) {
+        return true;
+      }
+
+      let validateOsImage = osImage;
+      if (isFleet) {
+        // Extract template variables if they are present, they contain otherwise invalid characters
+        const templateVariables = [...osImage.matchAll(TEMPLATE_VARIABLES_REGEXP)];
+        if (templateVariables.length > 0) {
+          const invalidVariables = templateVariables.filter(([match]) => {
+            const content = match.slice(2, -2).trim(); // Remove the surrounding "{{" and "}}", and trim any extra whitespace
+            return !content || !TEMPLATE_VARIABLES_CONTENT_REGEXP.test(content);
+          });
+          if (invalidVariables.length > 0) {
+            return false;
+          }
+          validateOsImage = osImage.replace(TEMPLATE_VARIABLES_REGEXP, 'tv');
+        }
+      }
+
+      return BASIC_DEVICE_OS_IMAGE_REGEXP.test(validateOsImage);
+    },
+  );
+
+export const validLabelsSchema = (t: TFunction, forbiddenLabels?: string[]) =>
   Yup.array()
     .of(
-      Yup.object<UnvalidatedLabel>().shape({
-        // We'll define the mandatory key restriction for all labels, not individually
-        key: Yup.string(),
+      Yup.object<FlightCtlLabel>().shape({
+        key: Yup.string()
+          .required()
+          .test('forbid labels', 'is forbidden', (key: string, testContext) => {
+            if (forbiddenLabels?.length && forbiddenLabels.includes(key)) {
+              return testContext.createError({
+                path: 'labels',
+                message: t('Label key "{{ forbiddenLabel }}" is forbidden', { forbiddenLabel: key }),
+              });
+            }
+            return true;
+          }),
         value: Yup.string(),
       }),
     )
     .required()
-    .test('missing keys', (labels: UnvalidatedLabel[], testContext) => {
+    .test('missing keys', (labels: FlightCtlLabel[], testContext) => {
       const missingKeyLabels = labels.filter((label) => !label.key).map((label) => label.value);
       return missingKeyLabels.length > 0
         ? testContext.createError({
@@ -207,44 +258,131 @@ export const validLabelsSchema = (t: TFunction) =>
         : true;
     })
     .test('unique keys', t('Label keys must be unique'), hasUniqueLabelKeys)
-    .test('invalid-labels', (labels: UnvalidatedLabel[], testContext) => {
+    .test('invalid-labels', (labels: FlightCtlLabel[], testContext) => {
       const invalidLabels = getInvalidKubernetesLabels(labels);
 
       return invalidLabels.length > 0
         ? testContext.createError({
             message: t('The following labels are not valid Kubernetes labels: {{invalidLabels}}', {
-              invalidLabels: `${invalidLabels.map((label) => labelToString(label as FlightCtlLabel)).join(', ')}`,
+              invalidLabels: `${invalidLabels.map(labelToString).join(', ')}`,
             }),
           })
         : true;
     });
 
-export const validApplicationsSchema = (t: TFunction) => {
+export const validGroupLabelKeysSchema = (t: TFunction) =>
+  Yup.array()
+    .of(
+      Yup.string()
+        .required()
+        .test('only-label-keys', t("Full labels are not allowed, use only the 'key' part."), (value?: string) => {
+          return !value?.includes('=');
+        }),
+    )
+    .test('unique keys', t('Label keys must be unique'), (labelKeys) => {
+      const uniqueKeys = new Set(labelKeys);
+      return uniqueKeys.size === labelKeys?.length;
+    });
+
+const appVariablesSchema = (t: TFunction) => {
   return Yup.array()
     .of(
       Yup.object().shape({
-        name: Yup.string(),
-        image: Yup.string().required(t('Image is required.')),
-        variables: Yup.array()
-          .of(
-            Yup.object().shape({
-              name: Yup.string().required(t('Variable name is required.')),
-              value: Yup.string().required(t('Variable value is required.')),
-            }),
-          )
-          .required(),
+        name: Yup.string()
+          .required(t('Variable name is required.'))
+          .matches(APPLICATION_VAR_NAME_REGEXP, t('Use alphanumeric characters, or underscore (_)')),
+        value: Yup.string().required(t('Variable value is required.')),
       }),
     )
-    .test('unique-app-ids', (apps: ApplicationFormSpec[] | undefined, testContext) => {
+    .required()
+    .test('unique-vars-names', t('Variable names of an application must be unique'), (vars) => {
+      const uniqueKeys = new Set(vars.map((varItem) => varItem.name));
+      return uniqueKeys.size === vars?.length;
+    });
+};
+
+const appSpecTypeSchema = (t: TFunction) =>
+  Yup.string().oneOf([AppSpecType.INLINE, AppSpecType.OCI_IMAGE]).required(t('Application type is required'));
+
+export const validApplicationsSchema = (t: TFunction) => {
+  return Yup.array()
+    .of(
+      Yup.lazy((value: AppForm) => {
+        if (isInlineAppForm(value)) {
+          return Yup.object<InlineAppForm>().shape({
+            specType: appSpecTypeSchema(t),
+            name: Yup.string()
+              .required(t('Name is required for inline applications.'))
+              .matches(
+                APPLICATION_NAME_REGEXP,
+                t(
+                  'Use lowercase alphanumeric characters, or dash (-). Must start and end with an alphanumeric character.',
+                ),
+              ),
+            files: Yup.array()
+              .of(
+                Yup.object().shape({
+                  content: Yup.string(),
+                  path: Yup.string()
+                    .required(t('File path is required'))
+                    .max(
+                      MAX_FILE_PATH_LENGTH,
+                      t('File path length cannot exceed {{ maxCharacters }} characters.', {
+                        maxCharacters: MAX_FILE_PATH_LENGTH,
+                      }),
+                    )
+                    .matches(
+                      relativePathRegex,
+                      t('Application file path must be relative. It cannot be outside the application directory.'),
+                    ),
+                }),
+              )
+              .required()
+              .min(1, t('Inline applications must include at least one file.'))
+              .test('unique-file-paths', (files: InlineAppForm['files'], testContext) => {
+                const duplicateFilePaths = Object.entries(countBy(files.map((file) => file.path)))
+                  .filter(([, count]) => {
+                    return count > 1;
+                  })
+                  .map(([filePath]) => filePath);
+
+                // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access
+                const duplicateIndex = ((testContext.parent.files || []) as InlineAppForm['files']).findIndex((file) =>
+                  duplicateFilePaths.includes(file.path),
+                );
+                if (duplicateIndex === -1) {
+                  return true;
+                }
+
+                return testContext.createError({
+                  path: `${testContext.path}[${duplicateIndex}].path`,
+                  message: () => t('Each file of the same application must use different paths.'),
+                });
+              }),
+            variables: appVariablesSchema(t),
+          });
+        }
+
+        // Image applications
+        return Yup.object<ImageAppForm>().shape({
+          specType: appSpecTypeSchema(t),
+          name: Yup.string().matches(
+            APPLICATION_NAME_REGEXP,
+            t('Use lowercase alphanumeric characters, or dash (-). Must start and end with an alphanumeric character.'),
+          ),
+          image: Yup.string()
+            .required(t('Image is required.'))
+            .matches(APPLICATION_IMAGE_REGEXP, t('Application image includes invalid characters.')),
+          variables: appVariablesSchema(t),
+        });
+      }),
+    )
+    .test('unique-app-ids', (apps: AppForm[] | undefined, testContext) => {
       if (!apps?.length) {
         return true;
       }
 
-      // App name is optional, in which case the ID is the app image.
-      // Apps should have different names or images
-      const getAppId = (app: ApplicationFormSpec) => app.name || app.image;
-
-      const appIds = apps.map(getAppId);
+      const appIds = apps.map(getAppIdentifier);
       const duplicateIds = Object.entries(countBy(appIds))
         .filter(([, count]) => {
           return count > 1;
@@ -255,7 +393,7 @@ export const validApplicationsSchema = (t: TFunction) => {
       }
 
       const errors = apps.reduce((errors, app, appIndex) => {
-        if (duplicateIds.includes(getAppId(app))) {
+        if (duplicateIds.includes(appIds[appIndex])) {
           const error = app.name
             ? new Yup.ValidationError(t('Application name must be unique.'), '', `applications[${appIndex}].name`)
             : new Yup.ValidationError(
@@ -273,6 +411,153 @@ export const validApplicationsSchema = (t: TFunction) => {
         message: () => errors,
       });
     });
+};
+
+export const validFleetRolloutPolicySchema = (t: TFunction) => {
+  return Yup.object()
+    .shape({
+      isAdvanced: Yup.boolean().required(),
+      updateTimeout: Yup.number()
+        .required('Update timeout is required')
+        .test('not-decimal', t('Cannot be decimal'), isInteger),
+      batches: Yup.array()
+        .of(
+          Yup.lazy((values: BatchForm) =>
+            Yup.object<BatchForm>().shape({
+              selector: validLabelsSchema(t),
+              limitType: Yup.string()
+                .oneOf([BatchLimitType.BatchLimitAbsoluteNumber, BatchLimitType.BatchLimitPercent])
+                .required(),
+              limit: Yup.number()
+                .test('correct-percentage', t('Percentage must be between 1 and 100.'), (num) => {
+                  if (num === undefined) {
+                    return true;
+                  }
+                  if (values.limitType === BatchLimitType.BatchLimitPercent && num > 100) {
+                    return false;
+                  }
+                  return true;
+                })
+                .test('not-decimal', t('Cannot be decimal'), isInteger)
+                // When an absolute number, we can only restrict the minimum value
+                .min(1, t('Value must be greater or equal than 1')),
+              successThreshold: Yup.number()
+                .required('Success threshold is required')
+                .min(1, t('Success threshold must be between 1 and 100'))
+                .max(100, t('Success threshold must be between 1 and 100'))
+                .test('not-decimal', t('Cannot be decimal'), isInteger),
+            }),
+          ),
+        )
+        .required(),
+    })
+    .test('valid-rollout', (rolloutPolicy: RolloutPolicyForm | undefined, testContext) => {
+      if (!rolloutPolicy || rolloutPolicy.batches.length === 0) {
+        return true;
+      }
+
+      const errors = rolloutPolicy.batches.reduce((errors, batch, batchIndex) => {
+        const hasError = batch.limit === undefined && Object.keys(batch.selector || {}).length === 0;
+        if (hasError) {
+          errors.push(
+            new Yup.ValidationError(
+              t('At least one of the label selector or numeric selector must be specified.'),
+              '',
+              `rolloutPolicy.batches[${batchIndex}]`,
+            ),
+          );
+        }
+        return errors;
+      }, [] as Yup.ValidationError[]);
+
+      return testContext.createError({
+        message: () => errors,
+      });
+    });
+};
+
+const requiredDownloadTimes = (t: TFunction, isStartTime: boolean) =>
+  Yup.string().when(['isAdvanced', 'downloadAndInstallDiffer'], ([isAdvanced, downloadAndInstallDiffer]) => {
+    if (!isAdvanced) {
+      return Yup.string();
+    }
+    if (downloadAndInstallDiffer) {
+      return Yup.string().required(
+        isStartTime ? t('Downloading start time is required') : t('Downloading end time is required'),
+      );
+    }
+    return Yup.string()
+      .required(
+        isStartTime
+          ? t('Downloading and installing start times are required')
+          : t('Downloading and installing end times are required'),
+      )
+      .matches(TIME_VALUE_REGEXP, t('Time must be in hh:mm with 24-hour format', { nsSeparator: '|' }));
+  });
+
+const requiredInstallTimes = (t: TFunction, isStartTime: boolean) =>
+  Yup.string().when(['isAdvanced', 'downloadAndInstallDiffer'], ([isAdvanced, downloadAndInstallDiffer]) => {
+    if (isAdvanced && downloadAndInstallDiffer) {
+      return Yup.string()
+        .required(isStartTime ? t('Installing start time is required') : t('Installing end time is required'))
+        .matches(TIME_VALUE_REGEXP, t('Time must be in hh:mm with 24-hour format', { nsSeparator: '|' }));
+    }
+    return Yup.string();
+  });
+
+const updateWeekDaysSchema = (t: TFunction) =>
+  Yup.array()
+    .required()
+    .of(Yup.boolean().required())
+    .test(
+      'selected weekdays',
+      t('Select at least one day of the week for "weekly" schedules'),
+      (selectedDays: boolean[], { path, parent }) => {
+        const parentWeekMode =
+          path === 'updatePolicy.downloadWeekDays'
+            ? (parent as UpdatePolicyForm).downloadScheduleMode
+            : (parent as UpdatePolicyForm).installScheduleMode;
+
+        if (parentWeekMode === UpdateScheduleMode.Weekly) {
+          return selectedDays.some(Boolean);
+        }
+
+        return true;
+      },
+    );
+
+export const validUpdatePolicySchema = (t: TFunction) => {
+  return Yup.object().shape({
+    isAdvanced: Yup.boolean().required(),
+    downloadAndInstallDiffer: Yup.boolean().required(),
+    // Fields are flattened so "isAdvanced" can be used for validating them
+    downloadStartsAt: requiredDownloadTimes(t, true),
+    downloadEndsAt: requiredDownloadTimes(t, false),
+    downloadScheduleMode: Yup.string().oneOf([UpdateScheduleMode.Weekly, UpdateScheduleMode.Daily]).required(),
+    downloadWeekDays: updateWeekDaysSchema(t),
+    downloadTimeZone: Yup.string().required(t('Select the timezone for downloading updates')),
+    installStartsAt: requiredInstallTimes(t, true),
+    installEndsAt: requiredInstallTimes(t, false),
+    installScheduleMode: Yup.string().oneOf([UpdateScheduleMode.Weekly, UpdateScheduleMode.Daily]).required(),
+    installWeekDays: updateWeekDaysSchema(t),
+    installTimeZone: Yup.string().required(t('Select the timezone for installing updates')),
+  });
+};
+
+export const validFleetDisruptionBudgetSchema = (t: TFunction) => {
+  return Yup.object()
+    .shape({
+      isAdvanced: Yup.boolean().required(),
+      minAvailable: Yup.number().test('not-decimal', t('Number of devices cannot be decimal'), isInteger),
+      maxUnavailable: Yup.number().test('not-decimal', t('Number of devices cannot be decimal'), isInteger),
+      groupBy: validGroupLabelKeysSchema(t),
+    })
+    .test(
+      'has-min-or-max',
+      t('At least one of minimum available or maximum unavailable devices is required.'),
+      (value: DisruptionBudgetForm) =>
+        !(value.isAdvanced && value.minAvailable === undefined && value.maxUnavailable === undefined),
+    );
 };
 
 export const validConfigTemplatesSchema = (t: TFunction) =>
@@ -303,6 +588,7 @@ export const validConfigTemplatesSchema = (t: TFunction) =>
         } else if (isHttpConfigTemplate(value)) {
           return Yup.object<HttpConfigTemplate>().shape({
             type: Yup.string().required(t('Source type is required.')),
+            repository: Yup.string().required(t('Repository is required.')),
             name: validKubernetesDnsSubdomain(t, { isRequired: true }),
             filePath: Yup.string()
               .required(t('File path is required.'))
@@ -333,7 +619,18 @@ export const validConfigTemplatesSchema = (t: TFunction) =>
                     t('File path must be unique.'),
                     (path) => !path || value.files.filter((file) => file.path === path).length == 1,
                   ),
-                content: Yup.string().required(t('File content is required.')),
+                content: Yup.string(),
+                permissions: Yup.string().test(
+                  'permissions',
+                  t('Permissions must use octal notation'),
+                  (perm: string | undefined) => {
+                    if (!perm) {
+                      return true;
+                    }
+                    const valNum = Number(`0o${perm}`);
+                    return Number.isFinite(valNum) && valNum >= 0 && valNum <= 0o7777;
+                  },
+                ),
               }),
             ),
           });
@@ -389,6 +686,7 @@ export const deviceSystemdUnitsValidationSchema = (t: TFunction) =>
     systemdUnits: systemdUnitListValidationSchema(t),
   });
 
+const forbiddenDeviceLabels = ['alias'];
 export const deviceApprovalValidationSchema = (t: TFunction, conf: { isSingleDevice: boolean }) =>
   Yup.object({
     deviceAlias: conf.isSingleDevice
@@ -397,5 +695,5 @@ export const deviceApprovalValidationSchema = (t: TFunction, conf: { isSingleDev
           /{{n}}/,
           t('Device aliases must be unique. Add a number to the template to generate unique aliases.'),
         ),
-    labels: validLabelsSchema(t),
+    labels: validLabelsSchema(t, forbiddenDeviceLabels),
   });

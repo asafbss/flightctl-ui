@@ -2,13 +2,12 @@ import * as React from 'react';
 import { FormGroup, Grid } from '@patternfly/react-core';
 import { FormikErrors } from 'formik';
 
-import { FleetFormValues } from '../types';
+import { FleetFormValues } from '../../../../types/deviceSpec';
 import { useTranslation } from '../../../../hooks/useTranslation';
 import NameField from '../../../form/NameField';
 import LabelsField from '../../../form/LabelsField';
 import FlightCtlForm from '../../../form/FlightCtlForm';
 import { getDnsSubdomainValidations } from '../../../form/validations';
-import WithHelperText from '../../../common/WithHelperText';
 import DeviceLabelSelector from './DeviceLabelSelector';
 
 export const generalInfoStepId = 'general-info';
@@ -25,7 +24,7 @@ const GeneralInfoStep = ({ isEdit }: { isEdit: boolean }) => {
       <FlightCtlForm>
         <NameField
           name="name"
-          aria-label={t('Name')}
+          aria-label={t('Fleet name')}
           isRequired
           isDisabled={isEdit}
           resourceType="fleets"
@@ -34,17 +33,7 @@ const GeneralInfoStep = ({ isEdit }: { isEdit: boolean }) => {
         <FormGroup label={t('Fleet labels')}>
           <LabelsField name="fleetLabels" />
         </FormGroup>
-        <FormGroup
-          label={
-            <WithHelperText
-              content={t(
-                'Devices matching these labels will be selected by the fleet. If left empty, no devices will be selected.',
-              )}
-              ariaLabel={t('Device selector')}
-              showLabel
-            />
-          }
-        >
+        <FormGroup label={t('Device selector')}>
           <DeviceLabelSelector />
         </FormGroup>
       </FlightCtlForm>

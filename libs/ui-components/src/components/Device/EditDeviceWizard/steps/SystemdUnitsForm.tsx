@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Label, LabelGroup } from '@patternfly/react-core';
 import { useFormikContext } from 'formik';
 
-import { DeviceSpecConfigFormValues } from '../types';
+import { DeviceSpecConfigFormValues } from '../../../../types/deviceSpec';
 import { useTranslation } from '../../../../hooks/useTranslation';
 
 import ErrorHelperText from '../../../form/FieldHelperText';
@@ -13,13 +13,15 @@ const SystemdUnitsForm = () => {
   const { values, setFieldValue, errors } = useFormikContext<DeviceSpecConfigFormValues>();
 
   const onAdd = (text: string) => {
-    void setFieldValue(
-      'systemdUnits',
-      values.systemdUnits.concat({
-        pattern: text,
-        exists: false,
-      }),
-    );
+    if (text) {
+      void setFieldValue(
+        'systemdUnits',
+        values.systemdUnits.concat({
+          pattern: text,
+          exists: false,
+        }),
+      );
+    }
   };
 
   const onEdit = (editIndex: number, text: string) => {

@@ -1,5 +1,10 @@
-import * as React from 'react';
-import { AppContext, AppContextProps, NavLinkFC, PromptFC } from '@flightctl/ui-components/src/hooks/useAppContext';
+import {
+  AppContext,
+  AppContextProps,
+  FlightCtlApp,
+  NavLinkFC,
+  PromptFC,
+} from '@flightctl/ui-components/src/hooks/useAppContext';
 import { ROUTE } from '@flightctl/ui-components/src/hooks/useNavigate';
 import {
   Link,
@@ -16,8 +21,6 @@ import { Prompt } from 'react-router-dom';
 import { getUser } from '@openshift-console/dynamic-plugin-sdk/lib/app/core/reducers';
 import { useSelector } from 'react-redux';
 import { useFetch } from '../../hooks/useFetch';
-import { useMetrics } from '../../hooks/useMetrics';
-import { DeviceImages, fetchImages } from '../../utils/apiCalls';
 
 export const OCPPluginAppContext = AppContext.Provider;
 
@@ -38,38 +41,17 @@ const appRoutes = {
   [ROUTE.RESOURCE_SYNC_DETAILS]: '/edge/resourcesyncs',
   [ROUTE.ENROLLMENT_REQUESTS]: '/edge/enrollmentrequests',
   [ROUTE.ENROLLMENT_REQUEST_DETAILS]: '/edge/enrollmentrequests',
+  [ROUTE.COMMAND_LINE_TOOLS]: '/', // CLI downloads are shown embedded in OCP's CLI downloads page and not as an independent route
 };
 
 export const useValuesAppContext = (): AppContextProps => {
   const fetch = useFetch();
-  const metrics = useMetrics();
   const userInfo = useSelector(getUser);
 
-  const [deviceImages, setDeviceImages] = React.useState<DeviceImages>({
-    qcow2: '',
-    bootc: '',
-  });
-
-  React.useEffect(() => {
-    const getImages = async () => {
-      try {
-        const imgs = await fetchImages();
-        setDeviceImages(imgs);
-      } catch (err) {
-        // eslint-disable-next-line
-        console.warn('Failed to fetch device images');
-        // eslint-disable-next-line
-        console.error(err);
-      }
-    };
-    getImages();
-  }, []);
-
   return {
-    appType: 'ocp',
+    appType: FlightCtlApp.OCP,
+    settings: {},
     user: userInfo?.username || '',
-    bootcImgUrl: deviceImages.bootc,
-    qcow2ImgUrl: deviceImages.qcow2,
     router: {
       Link,
       appRoutes,
@@ -87,6 +69,5 @@ export const useValuesAppContext = (): AppContextProps => {
       transNamespace: 'plugin__flightctl-plugin',
     },
     fetch,
-    metrics,
   };
 };

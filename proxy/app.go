@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/tls"
 	"net/http"
+	"os"
 	"time"
 
 	gorillaHandlers "github.com/gorilla/handlers"
@@ -19,7 +20,7 @@ import (
 func corsHandler(router *mux.Router) http.Handler {
 	return gorillaHandlers.CORS(
 		gorillaHandlers.AllowedOrigins([]string{"http://localhost:9000"}),
-		gorillaHandlers.AllowedMethods([]string{"GET", "POST", "DELETE", "PATCH"}),
+		gorillaHandlers.AllowedMethods([]string{"GET", "POST", "PUT", "DELETE", "PATCH"}),
 		gorillaHandlers.AllowedHeaders([]string{"Content-Type", "Authorization"}),
 		gorillaHandlers.AllowCredentials(),
 	)(router)
@@ -29,7 +30,7 @@ func main() {
 	log := log.InitLogs()
 	router := mux.NewRouter()
 	apiRouter := router.PathPrefix("/api").Subrouter()
-	apiRouter.Use(middleware.WsAuthMiddleware)
+	apiRouter.Use(middleware.AuthMiddleware)
 
 	tlsConfig, err := bridge.GetTlsConfig()
 	if err != nil {
@@ -39,23 +40,28 @@ func main() {
 	apiRouter.Handle("/flightctl/{forward:.*}", bridge.NewFlightCtlHandler(tlsConfig))
 	apiRouter.Handle("/metrics/{forward:.*}", bridge.NewMetricsHandler())
 
-	terminalBridge := bridge.TerminalBridge{TlsConfig: tlsConfig, Log: log}
+	_, cliArtifactsEnabled := os.LookupEnv("FLIGHTCTL_CLI_ARTIFACTS_SERVER")
+	if cliArtifactsEnabled {
+		apiRouter.Handle("/cli-artifacts", bridge.NewFlightCtlCliArtifactsHandler(tlsConfig))
+	} else {
+		apiRouter.HandleFunc("/cli-artifacts", bridge.UnimplementedHandler)
+	}
+
+	terminalBridge := bridge.TerminalBridge{TlsConfig: tlsConfig}
 	apiRouter.HandleFunc("/terminal/{forward:.*}", terminalBridge.HandleTerminal)
-	apiRouter.HandleFunc("/device-images", bridge.HandleDeviceImages)
 
 	if config.OcpPlugin != "true" {
-		oidcTlsConfig, err := bridge.GetOIDCTlsConfig()
+		authHandler, err := auth.NewAuth(tlsConfig)
 		if err != nil {
 			panic(err)
 		}
-
-		oidcHandler, err := auth.NewOIDCAuth(oidcTlsConfig, tlsConfig, config.TlsCertPath != "")
-		if err != nil {
-			panic(err)
-		}
-		apiRouter.HandleFunc("/login", oidcHandler.Login)
-		apiRouter.HandleFunc("/login/info", oidcHandler.GetUserInfo)
-		apiRouter.HandleFunc("/logout", oidcHandler.Logout)
+		apiRouter.HandleFunc("/login", authHandler.Login)
+		apiRouter.HandleFunc("/login/info", authHandler.GetUserInfo)
+		apiRouter.HandleFunc("/login/refresh", authHandler.Refresh)
+		apiRouter.HandleFunc("/logout", authHandler.Logout)
+	} else {
+		configHandler := config.OcpConfigHandler{}
+		apiRouter.HandleFunc("/config", configHandler.GetConfig)
 	}
 
 	spa := server.SpaHandler{}

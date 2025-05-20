@@ -3,8 +3,10 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ResourceAlertRule } from './ResourceAlertRule';
+/**
+ * Specification for monitoring a resource.
+ */
 export type ResourceMonitorSpec = {
-  monitorType: string;
   /**
    * Array of alert rules. Only one alert per severity is allowed.
    */

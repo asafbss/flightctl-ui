@@ -2,25 +2,34 @@ import { TFunction } from 'i18next';
 import * as Yup from 'yup';
 
 import {
-  maxLengthString,
   validApplicationsSchema,
   validConfigTemplatesSchema,
   validKubernetesLabelValue,
   validLabelsSchema,
+  validOsImage,
+  validUpdatePolicySchema,
 } from '../../form/validations';
-import { appendJSONPatch, getApplicationPatches, getLabelPatches } from '../../../utils/patch';
+import { appendJSONPatch, getDeviceLabelPatches, getUpdatePolicyPatches } from '../../../utils/patch';
 import { Device, PatchRequest } from '@flightctl/types';
-import { EditDeviceFormValues } from './types';
-import { getAPIConfig, getDeviceSpecConfigPatches } from './deviceSpecUtils';
+import { EditDeviceFormValues, UpdatePolicyForm } from './../../../types/deviceSpec';
+import {
+  ACMCrdConfig,
+  ACMImportConfig,
+  MicroshiftRegistrationHook,
+  getApiConfig,
+  getApplicationPatches,
+  getDeviceSpecConfigPatches,
+} from './deviceSpecUtils';
 
 export const getValidationSchema = (t: TFunction) =>
   Yup.lazy(() =>
     Yup.object({
       deviceAlias: validKubernetesLabelValue(t, { isRequired: false, fieldName: t('Alias') }),
-      osImage: maxLengthString(t, { fieldName: t('System image'), maxLength: 2048 }),
+      osImage: validOsImage(t, { isFleet: false }),
       labels: validLabelsSchema(t),
       configTemplates: validConfigTemplatesSchema(t),
       applications: validApplicationsSchema(t),
+      updatePolicy: validUpdatePolicySchema(t),
     }),
   );
 
@@ -29,12 +38,9 @@ export const getDevicePatches = (currentDevice: Device, updatedDevice: EditDevic
 
   // Device labels
   const currentLabels = currentDevice.metadata.labels || {};
-  const updatedLabels = updatedDevice.labels || [];
-  if (updatedDevice.deviceAlias) {
-    updatedLabels.push({ key: 'alias', value: updatedDevice.deviceAlias });
-  }
+  const updatedLabels = [...updatedDevice.labels];
 
-  const deviceLabelPatches = getLabelPatches('/metadata/labels', currentLabels, updatedLabels);
+  const deviceLabelPatches = getDeviceLabelPatches(currentLabels, updatedLabels, updatedDevice.deviceAlias);
   allPatches = allPatches.concat(deviceLabelPatches);
 
   if (updatedDevice.fleetMatch) {
@@ -67,13 +73,24 @@ export const getDevicePatches = (currentDevice: Device, updatedDevice: EditDevic
 
   // Configurations
   const currentConfigs = currentDevice.spec?.config || [];
-  const newConfigs = updatedDevice.configTemplates.map(getAPIConfig);
+  const newConfigs = updatedDevice.configTemplates.map(getApiConfig);
+  if (updatedDevice.registerMicroShift) {
+    newConfigs.push(ACMCrdConfig, ACMImportConfig, MicroshiftRegistrationHook);
+  }
   const configPatches = getDeviceSpecConfigPatches(currentConfigs, newConfigs, '/spec/config');
   allPatches = allPatches.concat(configPatches);
 
   // Applications
   const appPatches = getApplicationPatches('/spec', currentDevice.spec?.applications || [], updatedDevice.applications);
   allPatches = allPatches.concat(appPatches);
+
+  // Updates
+  const updatesPatches = getUpdatePolicyPatches(
+    '/spec/updatePolicy',
+    currentDevice.spec?.updatePolicy,
+    updatedDevice.updatePolicy as Required<UpdatePolicyForm>,
+  );
+  allPatches = allPatches.concat(updatesPatches);
 
   return allPatches;
 };

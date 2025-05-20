@@ -1,13 +1,4 @@
-import ConditionsTable from '../../DetailsPage/Tables/ConditionsTable';
-import DetailsPage from '../../DetailsPage/DetailsPage';
-import IntegrityDetails from '../../DetailsPage/Tables/IntegrityDetails';
-import LabelsView from '../../common/LabelsView';
-import { useFetchPeriodically } from '../../../hooks/useFetchPeriodically';
-import { timeSinceText } from '../../../utils/dates';
-import {
-  EnrollmentRequestStatus as EnrollmentRequestStatusType,
-  getApprovalStatus,
-} from '../../../utils/status/enrollmentRequest';
+import * as React from 'react';
 import {
   Bullseye,
   Card,
@@ -23,18 +14,30 @@ import {
   TextArea,
 } from '@patternfly/react-core';
 import { EnrollmentRequest } from '@flightctl/types';
-import * as React from 'react';
 
+import ConditionsTable from '../../DetailsPage/Tables/ConditionsTable';
+import DetailsPage from '../../DetailsPage/DetailsPage';
+import LabelsView from '../../common/LabelsView';
+import { useFetchPeriodically } from '../../../hooks/useFetchPeriodically';
+import { timeSinceText } from '../../../utils/dates';
+import {
+  EnrollmentRequestStatus as EnrollmentRequestStatusType,
+  getApprovalStatus,
+} from '../../../utils/status/enrollmentRequest';
 import { useFetch } from '../../../hooks/useFetch';
 import ApproveDeviceModal from '../../modals/ApproveDeviceModal/ApproveDeviceModal';
 import DetailsPageCard, { DetailsPageCardBody } from '../../DetailsPage/DetailsPageCard';
 import DetailsPageActions, { useDeleteAction } from '../../DetailsPage/DetailsPageActions';
 import EnrollmentRequestStatus from '../../Status/EnrollmentRequestStatus';
-import WithHelperText from '../../common/WithHelperText';
+import LabelWithHelperText from '../../common/WithHelperText';
 import FlightControlDescriptionList from '../../common/FlightCtlDescriptionList';
 import { useTranslation } from '../../../hooks/useTranslation';
 import { ROUTE, useNavigate } from '../../../hooks/useNavigate';
+import { useDeviceSpecSystemInfo } from '../../../hooks/useDeviceSpecSystemInfo';
 import { useAppContext } from '../../../hooks/useAppContext';
+import { useAccessReview } from '../../../hooks/useAccessReview';
+import { RESOURCE, VERB } from '../../../types/rbac';
+import PageWithPermissions from '../../common/PageWithPermissions';
 
 import './EnrollmentRequestDetails.css';
 
@@ -44,12 +47,18 @@ const EnrollmentRequestDetails = () => {
     router: { useParams },
   } = useAppContext();
   const { enrollmentRequestId } = useParams() as { enrollmentRequestId: string };
-  const [er, loading, error, refetch] = useFetchPeriodically<EnrollmentRequest>({
+  const [er, loading, error] = useFetchPeriodically<EnrollmentRequest>({
     endpoint: `enrollmentrequests/${enrollmentRequestId}`,
   });
   const { remove } = useFetch();
   const navigate = useNavigate();
+  const [canApprove] = useAccessReview(RESOURCE.ENROLLMENT_REQUEST_APPROVAL, VERB.POST);
+  const [canDelete] = useAccessReview(RESOURCE.ENROLLMENT_REQUEST, VERB.DELETE);
+
   const [isApprovalModalOpen, setIsApprovalModalOpen] = React.useState(false);
+  const erSystemInfo = useDeviceSpecSystemInfo(er?.spec.deviceStatus?.systemInfo, t);
+  const hasDefaultLabels = Object.keys(er?.spec.labels || {}).length > 0;
+  const deviceId = er?.metadata.name as string;
 
   const { deleteAction, deleteModal } = useDeleteAction({
     resourceName: enrollmentRequestId,
@@ -62,24 +71,27 @@ const EnrollmentRequestDetails = () => {
 
   const approvalStatus = er ? getApprovalStatus(er) : '-';
   const isPendingApproval = approvalStatus === EnrollmentRequestStatusType.Pending;
-
   return (
     <DetailsPage
       loading={loading}
       error={error}
-      id={er?.metadata.name as string}
+      id={deviceId}
       resourceLink={ROUTE.DEVICES}
       resourceType="Devices"
       resourceTypeLabel={t('Devices')}
       actions={
-        <DetailsPageActions>
-          <DropdownList>
-            <DropdownItem onClick={() => setIsApprovalModalOpen(true)} isDisabled={!isPendingApproval}>
-              {t('Approve')}
-            </DropdownItem>
-            {deleteAction}
-          </DropdownList>
-        </DetailsPageActions>
+        (canApprove || canDelete) && (
+          <DetailsPageActions>
+            <DropdownList>
+              {canApprove && (
+                <DropdownItem onClick={() => setIsApprovalModalOpen(true)} isDisabled={!isPendingApproval}>
+                  {t('Approve')}
+                </DropdownItem>
+              )}
+              {canDelete && deleteAction}
+            </DropdownList>
+          </DetailsPageActions>
+        )
       }
     >
       <Grid hasGutter>
@@ -90,7 +102,7 @@ const EnrollmentRequestDetails = () => {
               <FlightControlDescriptionList columnModifier={{ lg: '3Col' }}>
                 <DescriptionListGroup>
                   <DescriptionListTerm>{t('Name')}</DescriptionListTerm>
-                  <DescriptionListDescription>{er?.metadata.name || '-'}</DescriptionListDescription>
+                  <DescriptionListDescription>{deviceId}</DescriptionListDescription>
                 </DescriptionListGroup>
                 <DescriptionListGroup>
                   <DescriptionListTerm>{t('Last seen')}</DescriptionListTerm>
@@ -98,40 +110,52 @@ const EnrollmentRequestDetails = () => {
                     {timeSinceText(t, er?.metadata.creationTimestamp)}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('OS')}</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    {er?.spec?.deviceStatus?.systemInfo?.operatingSystem || '-'}
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Architecture')}</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    {er?.spec?.deviceStatus?.systemInfo?.architecture || '-'}
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>{t('Labels')}</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    <LabelsView prefix="er" labels={er?.metadata.labels} />
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
+                {hasDefaultLabels && (
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>{t('Labels')}</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      <LabelsView prefix="er" labels={er?.spec.labels} />
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                )}
                 <DescriptionListGroup>
                   <DescriptionListTerm>{t('Status')}</DescriptionListTerm>
                   <DescriptionListDescription>
                     <EnrollmentRequestStatus er={er} />
                   </DescriptionListDescription>
                 </DescriptionListGroup>
+                {erSystemInfo.baseInfo.map((systemInfo) => (
+                  <DescriptionListGroup key={systemInfo.title}>
+                    <DescriptionListTerm>{systemInfo.title}</DescriptionListTerm>
+                    <DescriptionListDescription>{systemInfo.value}</DescriptionListDescription>
+                  </DescriptionListGroup>
+                ))}
               </FlightControlDescriptionList>
             </CardBody>
           </Card>
         </GridItem>
+        {erSystemInfo.customInfo.length > 0 && (
+          <GridItem md={6}>
+            <DetailsPageCard>
+              <CardTitle>{t('Custom data')}</CardTitle>
+              <CardBody>
+                <FlightControlDescriptionList columnModifier={{ lg: '3Col' }}>
+                  {erSystemInfo.customInfo.map((systemInfo) => (
+                    <DescriptionListGroup key={systemInfo.title}>
+                      <DescriptionListTerm>{systemInfo.title}</DescriptionListTerm>
+                      <DescriptionListDescription>{systemInfo.value}</DescriptionListDescription>
+                    </DescriptionListGroup>
+                  ))}
+                </FlightControlDescriptionList>
+              </CardBody>
+            </DetailsPageCard>
+          </GridItem>
+        )}
         <GridItem md={6}>
           <DetailsPageCard>
             <CardTitle>
-              <WithHelperText
-                showLabel
-                ariaLabel={t('Certificate signing request')}
+              <LabelWithHelperText
+                label={t('Certificate signing request')}
                 content={t('A PEM-encoded PKCS#10 certificate signing request.')}
               />
             </CardTitle>
@@ -150,13 +174,13 @@ const EnrollmentRequestDetails = () => {
             </DetailsPageCardBody>
           </DetailsPageCard>
         </GridItem>
-        <GridItem md={6}>
-          <DetailsPageCard>
-            <CardTitle>
-              <WithHelperText showLabel ariaLabel={t('Certificate')} content={t('A PEM-encoded signed certificate.')} />
-            </CardTitle>
-            <DetailsPageCardBody>
-              {er?.status?.certificate ? (
+        {er?.status?.certificate && (
+          <GridItem md={6}>
+            <DetailsPageCard>
+              <CardTitle>
+                <LabelWithHelperText label={t('Certificate')} content={t('A PEM-encoded signed certificate.')} />
+              </CardTitle>
+              <DetailsPageCardBody>
                 <TextArea
                   aria-label={t('Certificate')}
                   value={er.status.certificate}
@@ -164,12 +188,11 @@ const EnrollmentRequestDetails = () => {
                   autoResize
                   className="fctl-enrollment-details__text-area"
                 />
-              ) : (
-                <Bullseye>{t('Not available')}</Bullseye>
-              )}
-            </DetailsPageCardBody>
-          </DetailsPageCard>
-        </GridItem>
+              </DetailsPageCardBody>
+            </DetailsPageCard>
+          </GridItem>
+        )}
+
         <GridItem md={6}>
           <DetailsPageCard>
             <CardTitle>{t('Conditions')}</CardTitle>
@@ -183,38 +206,13 @@ const EnrollmentRequestDetails = () => {
             </DetailsPageCardBody>
           </DetailsPageCard>
         </GridItem>
-        {!isPendingApproval && (
-          <GridItem md={6}>
-            <DetailsPageCard>
-              <CardTitle>{t('Device conditions')}</CardTitle>
-              <DetailsPageCardBody>
-                {er && (
-                  <ConditionsTable
-                    ariaLabel={t('Device conditions table')}
-                    conditions={er.spec.deviceStatus?.conditions}
-                  />
-                )}
-              </DetailsPageCardBody>
-            </DetailsPageCard>
-          </GridItem>
-        )}
-        {!isPendingApproval && (
-          <GridItem md={6}>
-            <DetailsPageCard>
-              <CardTitle>{t('System integrity details')}</CardTitle>
-              <DetailsPageCardBody>
-                {er && <IntegrityDetails integrity={er.spec.deviceStatus?.integrity} />}
-              </DetailsPageCardBody>
-            </DetailsPageCard>
-          </GridItem>
-        )}
       </Grid>
       {er && isApprovalModalOpen && (
         <ApproveDeviceModal
           enrollmentRequest={er}
-          onClose={(updateList) => {
+          onClose={(isApproved) => {
             setIsApprovalModalOpen(false);
-            updateList && refetch();
+            isApproved && navigate({ route: ROUTE.DEVICE_DETAILS, postfix: deviceId });
           }}
         />
       )}
@@ -223,4 +221,13 @@ const EnrollmentRequestDetails = () => {
   );
 };
 
-export default EnrollmentRequestDetails;
+const EnrollmentRequestDetailsWithPermissions = () => {
+  const [allowed, loading] = useAccessReview(RESOURCE.ENROLLMENT_REQUEST, VERB.GET);
+  return (
+    <PageWithPermissions allowed={allowed} loading={loading}>
+      <EnrollmentRequestDetails />
+    </PageWithPermissions>
+  );
+};
+
+export default EnrollmentRequestDetailsWithPermissions;

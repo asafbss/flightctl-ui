@@ -9,7 +9,7 @@ import LabelsField from '../../../form/LabelsField';
 import RichValidationTextField from '../../../form/RichValidationTextField';
 import { getLabelValueValidations } from '../../../form/validations';
 import DeviceLabelMatch from '../../../modals/ApproveDeviceModal/DeviceLabelMatch';
-import { EditDeviceFormValues } from '../types';
+import { EditDeviceFormValues } from '../../../../types/deviceSpec';
 
 export const generalInfoStepId = 'general-info';
 
@@ -44,7 +44,7 @@ const GeneralInfoStep = () => {
       <FlightCtlForm>
         <RichValidationTextField
           fieldName="deviceAlias"
-          aria-label={t('Alias')}
+          aria-label={t('Device alias')}
           validations={getLabelValueValidations(t)}
         />
         <FormGroup label={t('Device labels')}>

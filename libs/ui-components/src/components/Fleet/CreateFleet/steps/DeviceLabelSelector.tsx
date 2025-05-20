@@ -12,7 +12,7 @@ import { useFetch } from '../../../../hooks/useFetch';
 import { FlightCtlLabel } from '../../../../types/extraTypes';
 import { getApiListCount } from '../../../../utils/api';
 import { getErrorMessage } from '../../../../utils/error';
-import { labelToString } from '../../../../utils/labels';
+import { commonQueries } from '../../../../utils/query';
 
 const validateLabels = (labels: FlightCtlLabel[]) =>
   hasUniqueLabelKeys(labels) && getInvalidKubernetesLabels(labels).length === 0;
@@ -27,12 +27,9 @@ const DeviceLabelSelector = () => {
   const [deviceCount, setDeviceCount] = React.useState<number>(0);
 
   const updateDeviceCount = async (matchLabels: FlightCtlLabel[]) => {
-    const labelSelector = matchLabels.map(labelToString);
-
     try {
-      // TODO remove sortBy when https://issues.redhat.com/browse/EDM-624 is fixed. Otherwise the device count can be wrong.
       const deviceListResp = await get<DeviceList>(
-        `devices?labelSelector=${labelSelector.join(',')}&limit=1&sortBy=metadata.name`,
+        commonQueries.getDevicesWithExactLabelMatching(matchLabels, { limit: 1 }),
       );
       const num = getApiListCount(deviceListResp);
       setDeviceCount(num || 0);
@@ -98,7 +95,7 @@ const DeviceLabelSelector = () => {
       />
     );
   } else {
-    message = t('Add labels to select devices to be included in this fleet.');
+    message = t('Labels used to select devices for your fleet. If not specified, no devices will be added.');
   }
 
   return (

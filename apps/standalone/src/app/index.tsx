@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { Bullseye, Spinner } from '@patternfly/react-core';
 import { AppContext } from '@flightctl/ui-components/src/hooks/useAppContext';
 
 import { AppRouter } from './routes';
@@ -8,19 +7,13 @@ import { AuthContext, useAuthContext } from './context/AuthContext';
 
 import '@patternfly/react-core/dist/styles/base.css';
 import '@patternfly/react-styles/css/utilities/Spacing/spacing.css';
+import '@patternfly/react-styles/css/utilities/Text/text.css';
+
 import './app.css';
 
 const App: React.FunctionComponent = () => {
   const appContextValue = useStandaloneAppContext();
   const authContextValue = useAuthContext();
-
-  if (authContextValue.loading) {
-    return (
-      <Bullseye>
-        <Spinner />
-      </Bullseye>
-    );
-  }
 
   return (
     <React.Suspense fallback={<div />}>
