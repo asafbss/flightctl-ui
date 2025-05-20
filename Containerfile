@@ -9,6 +9,7 @@ COPY tsconfig.json /app
 COPY libs /app/libs
 COPY apps /app/apps
 ENV NODE_OPTIONS='--max-old-space-size=6144'
+RUN free -h
 RUN npm ci
 RUN npm run build
 
