@@ -8,8 +8,9 @@ COPY package-lock.json /app
 COPY tsconfig.json /app
 COPY libs /app/libs
 COPY apps /app/apps
-ENV NODE_OPTIONS='--max-old-space-size=6144'
-RUN free -h
+ENV NODE_OPTIONS='--max-old-space-size=8192'
+RUN echo "/proc/meminfo snapshot:" && \
+    head -n 10 /proc/meminfo
 RUN npm ci
 RUN npm run build
 
