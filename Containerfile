@@ -3,6 +3,7 @@ USER root
 RUN microdnf install -y rsync
 
 WORKDIR /app
+ARG CYPRESS_INSTALL_BINARY
 COPY package.json /app
 COPY package-lock.json /app
 COPY tsconfig.json /app
